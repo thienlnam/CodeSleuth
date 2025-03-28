@@ -28,7 +28,12 @@ from .parser import CodeChunk, CodeParser
 MODEL_MAPPING = {
     EmbeddingModel.CODEBERT: "microsoft/codebert-base",
     EmbeddingModel.E5_SMALL: "intfloat/e5-small-v2",
-    # We can add more models here as needed
+}
+
+# MLX model registry names
+MLX_MODEL_MAPPING = {
+    EmbeddingModel.CODEBERT: "codebert",
+    EmbeddingModel.E5_SMALL: "e5-small",
 }
 
 # Import MLX Embedding Models
@@ -66,22 +71,30 @@ class CodeEmbedder:
         is_apple_silicon = platform.processor() == "arm"
         problematic_environment = is_python_3_13 and is_apple_silicon
 
+        # Get the full model name from mapping
+        logger.info(
+            f"Using model: {model_name}, Apple Silicon: {problematic_environment}"
+        )
+
         # Use MLX on Apple Silicon if available
         if problematic_environment and MLX_AVAILABLE:
             logger.info("Using MLX Embedding Models for Apple Silicon compatibility")
             self.use_mlx = True
             self.device = None  # MLX handles device management
-            self.model = MLXEmbeddingModel.from_registry(model_name)
+            # Use MLX-specific model name
+            mlx_model_name = MLX_MODEL_MAPPING.get(model_name, model_name)
+            logger.info(f"Using MLX model: {mlx_model_name}")
+            self.model = MLXEmbeddingModel.from_registry(mlx_model_name)
             self.tokenizer = None  # MLX handles tokenization
         else:
             self.use_mlx = False
             self.device = torch.device(
                 "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
             )
+            model_hf_name = MODEL_MAPPING.get(model_name, model_name)
             logger.info(f"Using device: {self.device}")
 
             # Load tokenizer and model
-            model_hf_name = MODEL_MAPPING.get(model_name, model_name)
             logger.info(f"Loading model: {model_hf_name}")
 
             # Load the model and tokenizer
