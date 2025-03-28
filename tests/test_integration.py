@@ -224,73 +224,30 @@ private:
     def test_index_and_search(self):
         """Test indexing and searching the test repository."""
         # Index the repository
-        print("DEBUG: Starting indexing of repository", file=sys.stderr)
         self.codesleuth.index_repository()
-        print("DEBUG: Indexing completed successfully", file=sys.stderr)
 
-        # Print index details
-        print(
-            f"DEBUG: Index has {self.codesleuth.semantic_search.semantic_index.index.ntotal if hasattr(self.codesleuth.semantic_search.semantic_index.index, 'ntotal') else 'unknown'} vectors",
-            file=sys.stderr,
-        )
-
-        # Force garbage collection before search
-        print("DEBUG: Running garbage collection before search", file=sys.stderr)
+        # Run garbage collection before search
         gc.collect()
 
-        try:
-            # Get access to the internal index
-            index = self.codesleuth.semantic_search.semantic_index.index
-            index_type = type(index).__name__
-            print(f"DEBUG: Index type: {index_type}", file=sys.stderr)
+        # Test semantic search
+        query = "search function"
+        semantic_results = self.codesleuth.search_semantically(query, top_k=5)
 
-            # Check if it's an IDMap-wrapped HNSW
-            is_hnsw = False
-            if hasattr(index, "index") and isinstance(index, faiss.IndexIDMap):
-                inner_index = index.index
-                inner_type = type(inner_index).__name__
-                print(f"DEBUG: Inner index type: {inner_type}", file=sys.stderr)
-                if isinstance(inner_index, faiss.IndexHNSWFlat):
-                    is_hnsw = True
-                    print(
-                        f"DEBUG: HNSW parameters: M={inner_index.hnsw.M}, efConstruction={inner_index.hnsw.efConstruction}, efSearch={inner_index.hnsw.efSearch}",
-                        file=sys.stderr,
-                    )
+        # Verify we got results
+        self.assertGreater(
+            len(semantic_results),
+            0,
+            "Should find semantic results for 'search function'",
+        )
 
-            # Test semantic search
-            print("DEBUG: About to run semantic search", file=sys.stderr)
-            query = "search function"
-
-            # Perform the semantic search through the API
-            print(f"DEBUG: Searching with query: '{query}', top_k=5", file=sys.stderr)
-            semantic_results = self.codesleuth.search_semantically(query, top_k=5)
-            print(
-                f"DEBUG: Semantic search returned {len(semantic_results)} results",
-                file=sys.stderr,
-            )
-
-            # Verify we got results
-            self.assertGreater(
-                len(semantic_results),
-                0,
-                "Should find semantic results for 'search function'",
-            )
-
-            # Check that results have the expected fields
-            first_result = semantic_results[0]
-            self.assertIn("file_path", first_result)
-            self.assertIn("start_line", first_result)
-            self.assertIn("end_line", first_result)
-            self.assertIn("code", first_result)
-            self.assertIn("similarity", first_result)
-            self.assertEqual(first_result["source"], "semantic")
-
-        except Exception as e:
-            print(f"DEBUG: Error in semantic search: {e}", file=sys.stderr)
-            import traceback
-
-            traceback.print_exc(file=sys.stderr)
-            raise
+        # Check that results have the expected fields
+        first_result = semantic_results[0]
+        self.assertIn("file_path", first_result)
+        self.assertIn("start_line", first_result)
+        self.assertIn("end_line", first_result)
+        self.assertIn("code", first_result)
+        self.assertIn("similarity", first_result)
+        self.assertEqual(first_result["source"], "semantic")
 
         # Test lexical search - wrap in try/except to handle case where ripgrep isn't installed
         try:
@@ -299,7 +256,7 @@ private:
                 len(lexical_results), 0, "Should find lexical results for 'search'"
             )
         except Exception as e:
-            print(f"Lexical search test skipped: {e}")
+            logger.warning(f"Lexical search test skipped: {e}")
 
         # Test file search
         file_results = self.codesleuth.search_file("*.py")
@@ -323,25 +280,13 @@ private:
         initial_chunk_count = len(
             self.codesleuth.semantic_search.semantic_index.metadata
         )
-        print(f"DEBUG: Initial chunk count: {initial_chunk_count}")
-
-        # Print initial results for debugging
-        print("DEBUG: Initial search results:")
-        for i, result in enumerate(initial_results):
-            print(
-                f"DEBUG: Result {i}: {result['file_path']} - {result['code'][:50]}..."
-            )
 
         # Update a file by overwriting it with additional content
         js_file = self.repo_path / "example.js"
-        print(f"DEBUG: Updating file: {js_file}")
 
         # First, read the existing content
         with open(js_file, "r") as f:
             existing_content = f.read()
-            print(
-                f"DEBUG: Original JS file has {len(existing_content)} chars and {existing_content.count('\\n')} lines"
-            )
 
         # Then write it back with additional content
         new_content = """/**
@@ -363,49 +308,13 @@ function newSemanticSearch(query) {
             f.write("\n\n\n\n\n\n\n\n\n\n")  # 10 newlines for clear separation
             f.write(new_content)
 
-        # Verify the file was updated
-        with open(js_file, "r") as f:
-            content = f.read()
-            print(
-                f"DEBUG: Updated JS file has {len(content)} chars and {content.count('\\n')} lines"
-            )
-            print(
-                f"DEBUG: Updated file now contains newSemanticSearch: {'newSemanticSearch' in content}"
-            )
-            print(f"DEBUG: Updated file content (last 300 chars): {content[-300:]}")
-
-        # Debug the parser's chunking directly
-        print("DEBUG: Testing parser directly on updated file:")
-        # Create a parser directly since it's not exposed through the API
-        from codesleuth.indexing.parser import CodeParser
-
-        parser = CodeParser(self.config)
-        chunks = list(parser.parse_file(js_file))
-        print(f"DEBUG: Parser found {len(chunks)} chunks in updated JS file")
-        for i, chunk in enumerate(chunks):
-            print(
-                f"DEBUG: Chunk {i}: lines {chunk.start_line}-{chunk.end_line}, code snippet: {chunk.code[:80].replace(chr(10), ' ')}..."
-            )
-            print(
-                f"DEBUG: Contains newSemanticSearch: {'newSemanticSearch' in chunk.code}"
-            )
-            if "newSemanticSearch" in chunk.code:
-                print(f"DEBUG: Full chunk with newSemanticSearch: {chunk.code}")
-
-        # Also examine chunk_size and chunk_overlap in the parser config
-        print(
-            f"DEBUG: Chunk size: {self.config.parser.chunk_size}, Chunk overlap: {self.config.parser.chunk_overlap}"
-        )
-
         # Re-index the repository
-        print("DEBUG: Re-indexing repository")
         self.codesleuth.index_repository()
 
-        # Check that metadata was updated - this is a good sign that indexing worked
+        # Check that metadata was updated
         updated_chunk_count = len(
             self.codesleuth.semantic_search.semantic_index.metadata
         )
-        print(f"DEBUG: Updated chunk count: {updated_chunk_count}")
 
         # Verify that the number of chunks increased
         self.assertGreater(
@@ -415,21 +324,9 @@ function newSemanticSearch(query) {
         )
 
         # Search with a query specifically targeting the new content
-        print("DEBUG: Searching for 'newSemanticSearch'")
         updated_results = self.codesleuth.search_semantically(
             "newSemanticSearch", top_k=10
         )
-        print(f"DEBUG: Found {len(updated_results)} results")
-
-        # Print all results for debugging
-        for i, result in enumerate(updated_results):
-            print(
-                f"DEBUG: Result {i}: {result['file_path']} - {result['code'][:50]}..."
-            )
-            print(f"DEBUG: Full code for result {i}: {result['code']}")
-            print(
-                f"DEBUG: Contains newSemanticSearch: {'newSemanticSearch' in result['code']}"
-            )
 
         # Check that we have results
         self.assertGreater(
@@ -439,21 +336,9 @@ function newSemanticSearch(query) {
         # At least one result should contain our new function
         new_function_found = False
         for result in updated_results:
-            print(f"DEBUG: Checking result: {'newSemanticSearch' in result['code']}")
             if "newSemanticSearch" in result["code"]:
                 new_function_found = True
                 break
-
-        # Special test to directly search the index with the exact new function name
-        direct_results = self.codesleuth.search_semantically(
-            "newSemanticSearch function special", top_k=10
-        )
-        print(f"DEBUG: Direct search found {len(direct_results)} results")
-        for i, result in enumerate(direct_results):
-            print(f"DEBUG: Direct result {i}: {result['code'][:50]}...")
-            print(
-                f"DEBUG: Contains newSemanticSearch: {'newSemanticSearch' in result['code']}"
-            )
 
         self.assertTrue(
             new_function_found, "The updated file with new function should be indexed"
