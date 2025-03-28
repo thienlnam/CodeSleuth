@@ -43,7 +43,7 @@ class TestCodeSleuthIntegration(unittest.TestCase):
 
             # Configure semantic search
             index_config = IndexConfig(
-                model_name=EmbeddingModel.CODEBERT,
+                model_name=EmbeddingModel.BGE_M3,
                 index_path=str(cls.index_path),
                 batch_size=8,
                 use_gpu=False,

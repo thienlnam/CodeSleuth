@@ -16,6 +16,7 @@ class EmbeddingModel(str, Enum):
 
     CODEBERT = "codebert"
     E5_SMALL = "e5-small-v2"
+    BGE_M3 = "bge-m3"
 
 
 class VectorStore(str, Enum):
@@ -67,7 +68,7 @@ class IndexConfig(BaseModel):
     """Configuration for the semantic index."""
 
     model_name: EmbeddingModel = Field(
-        default=EmbeddingModel.CODEBERT,
+        default=EmbeddingModel.BGE_M3,
         description="Model to use for embeddings",
     )
     vector_store: VectorStore = Field(

@@ -78,7 +78,7 @@ class IntegrationTest(unittest.TestCase):
         )
 
         index_config = IndexConfig(
-            model_name=EmbeddingModel.CODEBERT,
+            model_name=EmbeddingModel.BGE_M3,
             index_path=self.index_path,
             batch_size=8,
             use_gpu=False,

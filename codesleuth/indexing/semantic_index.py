@@ -50,6 +50,13 @@ MODEL_REGISTRY = {
         mlx_name=None,  # E5-small not supported on MLX
         embedding_dim=384,
     ),
+    EmbeddingModel.BGE_M3: ModelInfo(
+        name="bge-m3",
+        huggingface_name="BAAI/bge-m3",
+        mlx_name="bge-m3",  # BGE-M3 is supported on MLX
+        embedding_dim=1024,  # BGE-M3 has larger embeddings
+        max_length=512,
+    ),
 }
 
 
