@@ -24,17 +24,34 @@ from transformers import AutoModel, AutoTokenizer
 from ..config import CodeSleuthConfig, EmbeddingModel, IndexConfig
 from .parser import CodeChunk, CodeParser
 
-# Model names for HuggingFace
-MODEL_MAPPING = {
-    EmbeddingModel.CODEBERT: "microsoft/codebert-base",
-    EmbeddingModel.E5_SMALL: "intfloat/e5-small-v2",
+
+@dataclass
+class ModelInfo:
+    """Information about an embedding model."""
+
+    name: str
+    huggingface_name: str
+    mlx_name: Optional[str] = None  # None means not supported on MLX
+    embedding_dim: int
+    max_length: int = 512
+
+
+# Simple registry of supported models
+MODEL_REGISTRY = {
+    EmbeddingModel.CODEBERT: ModelInfo(
+        name="codebert",
+        huggingface_name="microsoft/codebert-base",
+        mlx_name=None,  # CodeBERT not supported on MLX
+        embedding_dim=768,
+    ),
+    EmbeddingModel.E5_SMALL: ModelInfo(
+        name="e5-small-v2",
+        huggingface_name="intfloat/e5-small-v2",
+        mlx_name=None,  # E5-small not supported on MLX
+        embedding_dim=384,
+    ),
 }
 
-# MLX model registry names
-MLX_MODEL_MAPPING = {
-    EmbeddingModel.CODEBERT: "bge-small",  # Using BGE-small as a replacement for CodeBERT
-    EmbeddingModel.E5_SMALL: "bge-small",  # Using BGE-small as a replacement for E5-small
-}
 
 # Import MLX Embedding Models
 try:
@@ -58,50 +75,53 @@ class IndexEntry:
 class CodeEmbedder:
     """Code embedding model."""
 
-    def __init__(self, model_name: str, use_gpu: bool = False):
+    def __init__(self, model_name: EmbeddingModel, use_gpu: bool = False):
         """
         Initialize the code embedder.
 
         Args:
             model_name: Name of the model to use
             use_gpu: Whether to use GPU for embedding computation
+
+        Raises:
+            ValueError: If the model is not supported or not available on the current platform
         """
-        # Detect Python 3.13 on M1/M2 Macs for compatibility issues
-        is_python_3_13 = sys.version_info.major == 3 and sys.version_info.minor == 13
+        if model_name not in MODEL_REGISTRY:
+            raise ValueError(
+                f"Model {model_name} not supported. Available models: {list(MODEL_REGISTRY.keys())}"
+            )
+
+        self.model_info = MODEL_REGISTRY[model_name]
+
+        # Check platform and model support
         is_apple_silicon = platform.processor() == "arm"
-        problematic_environment = is_python_3_13 and is_apple_silicon
-
-        # Get the full model name from mapping
-        logger.info(
-            f"Using model: {model_name}, Apple Silicon: {problematic_environment}"
-        )
-
-        # Use MLX on Apple Silicon if available
-        if problematic_environment and MLX_AVAILABLE:
-            logger.info("Using MLX Embedding Models for Apple Silicon compatibility")
+        if is_apple_silicon and MLX_AVAILABLE:
+            if self.model_info.mlx_name is None:
+                raise ValueError(
+                    f"Model {model_name} is not supported on Apple Silicon with MLX. "
+                    "Please use a different model or run without MLX support."
+                )
+            logger.info(f"Using MLX model: {self.model_info.mlx_name}")
             self.use_mlx = True
             self.device = None  # MLX handles device management
-            # Use MLX-specific model name
-            mlx_model_name = MLX_MODEL_MAPPING.get(model_name, model_name)
-            logger.info(f"Using MLX model: {mlx_model_name}")
-            self.model = MLXEmbeddingModel.from_registry(mlx_model_name)
+            self.model = MLXEmbeddingModel.from_registry(self.model_info.mlx_name)
             self.tokenizer = None  # MLX handles tokenization
         else:
             self.use_mlx = False
             self.device = torch.device(
                 "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
             )
-            model_hf_name = MODEL_MAPPING.get(model_name, model_name)
-            logger.info(f"Using device: {self.device}")
-
-            # Load tokenizer and model
-            logger.info(f"Loading model: {model_hf_name}")
+            logger.info(
+                f"Using HuggingFace model: {self.model_info.huggingface_name} on {self.device}"
+            )
 
             # Load the model and tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(model_hf_name)
-            self.model = AutoModel.from_pretrained(model_hf_name).to(self.device)
-
-            # Set model to evaluation mode
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_info.huggingface_name
+            )
+            self.model = AutoModel.from_pretrained(self.model_info.huggingface_name).to(
+                self.device
+            )
             self.model.eval()
 
     def embed(self, code: str) -> np.ndarray:
@@ -129,7 +149,7 @@ class CodeEmbedder:
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
-                    max_length=512,
+                    max_length=self.model_info.max_length,
                 ).to(self.device)
 
                 with torch.no_grad():
@@ -170,7 +190,7 @@ class CodeEmbedder:
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
-                    max_length=512,
+                    max_length=self.model_info.max_length,
                 ).to(self.device)
 
                 # Compute embeddings
@@ -252,13 +272,8 @@ class SemanticIndex:
         # Create directory if it doesn't exist
         self.index_path.mkdir(parents=True, exist_ok=True)
 
-        # Get embedding dimension based on model
-        if self.embedder.use_mlx:
-            embedding_dim = 384  # BGE-small embedding dimension
-        elif self.config.model_name == EmbeddingModel.E5_SMALL:
-            embedding_dim = 384  # E5-small-v2 embedding dimension
-        else:
-            embedding_dim = 768  # CodeBERT embedding dimension
+        # Get embedding dimension from model registry
+        embedding_dim = MODEL_REGISTRY[self.config.model_name].embedding_dim
 
         # Detect Python 3.13 on M1/M2 Macs for compatibility issues
         is_python_3_13 = sys.version_info.major == 3 and sys.version_info.minor == 13
