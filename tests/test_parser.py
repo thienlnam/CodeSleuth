@@ -1,13 +1,64 @@
+import os
 import pytest
 from pathlib import Path
 
 from codesleuth.config import CodeSleuthConfig, ParserConfig
-from codesleuth.indexing.parser import create_parser, CodeParser, CodeChunk
+from codesleuth.indexing.parser import (
+    create_parser,
+    CodeParser,
+    CodeChunk,
+    TreeSitterManager,
+)
+
+
+@pytest.fixture(scope="session")
+def tree_sitter_manager():
+    """Create a TreeSitterManager once for the entire test session."""
+    return TreeSitterManager()
+
+
+@pytest.fixture(scope="session")
+def session_config():
+    """Create a configuration for the entire test session."""
+    config = CodeSleuthConfig()
+    # Fix the ignore patterns to use valid regex patterns
+    config.parser.ignore_patterns = [
+        r"node_modules/.*",
+        r"dist/.*",
+        r"build/.*",
+        r"\.git/.*",
+        r"__pycache__/.*",
+        r".*\.pyc$",
+    ]
+    return config
+
+
+@pytest.fixture(scope="session")
+def session_parser(session_config, tree_sitter_manager):
+    """Create a parser once for the entire test session."""
+    parser = create_parser(session_config)
+    # Replace the parser's tree_sitter_manager with our session-scoped one
+    parser.tree_sitter_manager = tree_sitter_manager
+    return parser
 
 
 @pytest.fixture
-def test_files_dir(tmp_path):
+def config(session_config):
+    """Return the session-scoped config for tests that need a non-session fixture."""
+    return session_config
+
+
+@pytest.fixture
+def parser(session_parser):
+    """Return the session-scoped parser for tests that need a non-session fixture."""
+    return session_parser
+
+
+@pytest.fixture(scope="session")
+def test_files_dir(tmp_path_factory):
     """Create a directory with test files for each supported language."""
+    # Use tmp_path_factory for session-scoped fixture
+    tmp_path = tmp_path_factory.mktemp("test_files")
 
     # Python test file
     python_file = tmp_path / "example.py"
@@ -92,22 +143,6 @@ void another_function() {
     return tmp_path
 
 
-@pytest.fixture
-def config():
-    """Create a default config for testing."""
-    config = CodeSleuthConfig()
-    # Fix the ignore patterns to use valid regex patterns
-    config.parser.ignore_patterns = [
-        r"node_modules/.*",
-        r"dist/.*",
-        r"build/.*",
-        r"\.git/.*",
-        r"__pycache__/.*",
-        r".*\.pyc$",
-    ]
-    return config
-
-
 def test_language_detection(config):
     """Test that file extensions map to correct languages."""
     parser = create_parser(config)
@@ -134,10 +169,9 @@ def test_language_detection(config):
     ],
 )
 def test_parser_language_support(
-    file_name, language, expected_symbol, test_files_dir, config
+    file_name, language, expected_symbol, test_files_dir, parser
 ):
     """Test parser supports multiple languages correctly."""
-    parser = create_parser(config)
     file_path = test_files_dir / file_name
 
     chunks = parser.parse_file(file_path)
@@ -161,10 +195,8 @@ def test_parser_language_support(
     assert has_expected_symbol or using_fallback
 
 
-def test_fallback_parser(test_files_dir, config):
+def test_fallback_parser(test_files_dir, parser):
     """Test the fallback parser when Tree-sitter parsing fails."""
-    parser = create_parser(config)
-
     # Force fallback by using an unsupported file extension
     unsupported_file = test_files_dir / "example.txt"
     with open(unsupported_file, "w") as f:
@@ -182,9 +214,8 @@ def test_fallback_parser(test_files_dir, config):
     assert "using the fallback parser" in all_text
 
 
-def test_empty_file(test_files_dir, config):
+def test_empty_file(test_files_dir, parser):
     """Test handling of empty files."""
-    parser = create_parser(config)
     empty_file = test_files_dir / "empty.py"
 
     chunks = parser.parse_file(empty_file)
@@ -193,10 +224,8 @@ def test_empty_file(test_files_dir, config):
     assert len(chunks) == 0 or (len(chunks) == 1 and not chunks[0].code.strip())
 
 
-def test_parse_directory(test_files_dir, config):
+def test_parse_directory(test_files_dir, parser):
     """Test parsing an entire directory."""
-    parser = create_parser(config)
-
     # Parse all files in the test directory
     chunks = list(parser.parse_directory(test_files_dir))
 
@@ -227,10 +256,8 @@ def test_parse_directory(test_files_dir, config):
         )
 
 
-def test_should_ignore_file(config):
+def test_should_ignore_file(parser):
     """Test that files matching ignore patterns are skipped."""
-    parser = create_parser(config)
-
     # Should ignore common patterns by default
     assert parser.should_ignore_file("node_modules/some_package.js")
     assert parser.should_ignore_file("build/output.js")
