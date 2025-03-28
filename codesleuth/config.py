@@ -141,11 +141,10 @@ class CodeSleuthConfig(BaseModel):
         description="Search configuration",
     )
 
-    class Config:
-        """Pydantic config."""
-
-        validate_assignment = True
-        extra = "forbid"
+    model_config = {
+        "validate_assignment": True,
+        "extra": "forbid",
+    }
 
 
 def load_config(config_path: Optional[Union[str, Path]] = None) -> CodeSleuthConfig:
