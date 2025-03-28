@@ -399,17 +399,28 @@ class CodeSleuth:
         if not os.path.isabs(file_path):
             file_path = os.path.join(str(self.config.repo_path), file_path)
 
+        logger.debug(f"Searching for metadata in file: {file_path}")
+        logger.debug(f"File exists: {os.path.exists(file_path)}")
+
         # Search for functions using ripgrep with generic patterns
         function_patterns = [
             # Generic function/method definitions with context
             r"(?m)^[ \t]*(?:def|function|fn|func)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^def\n][^\n]*)*",  # Common function keywords
-            r"(?m)^[ \t]*(?:public|private|protected|static|async)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(public|private|protected|static|async)\n][^\n]*)*",  # Method modifiers
+            r"(?m)^[ \t]*(?:public|private|protected|static|async|virtual|inline)\s+(?:const\s+)?(?:\w+[&*\s]+)*\w+\s*\([^)]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:\{|:)(?:\s*\n\s*[^(public|private|protected|static|async|virtual|inline)\n][^\n]*)*",  # Method modifiers (including C++)
             r"(?m)^[ \t]*(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>.*(?:\{|:)(?:\s*\n\s*[^(const|let|var)\n][^\n]*)*",  # Arrow functions
+            r"(?m)^[ \t]*(?:\w+[&*\s]+)*\w+\s*\([^)]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:\{|:)(?:\s*\n\s*[^\n]*)*",  # C++ free functions
+            r"(?m)^[ \t]*(?:function)\s+\w+\s*\([^)]*\)\s*(?:\{|:)(?:\s*\n\s*[^function\n][^\n]*)*",  # PHP functions
         ]
 
         # Search for classes using generic patterns
         class_patterns = [
-            r"(?m)^[ \t]*(?:pub\s+)?(?:export\s+)?(?:abstract\s+)?(?:class|struct|type\s+\w+\s+struct)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|struct|type)\n][^\n]*)*",  # Class-like definitions
+            # C++ template class pattern
+            r"(?m)^[ \t]*(?:template\s*<\s*typename\s+\w+\s*>\s*)?(?:class)\s+\w+(?:\s*:\s*(?:public|private|protected)\s+\w+(?:<[^>]+>)?(?:\s*,\s*(?:public|private|protected)\s+\w+(?:<[^>]+>)?)*)?[^{]*\{(?:[^{}]*|\{(?:[^{}]*|\{[^{}]*\})*\})*\}",
+            # Other patterns
+            r"(?m)^[ \t]*(?:class)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(class)\n][^\n]*)*",
+            r"(?m)^[ \t]*(?:export\s+)?(?:abstract\s+)?(?:class|interface)\s+\w+(?:\s*:\s*(?:public|private|protected)\s+\w+)?(?:\s+implements\s+\w+(?:\s*,\s*\w+)*)?[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|interface)\n][^\n]*)*",
+            r"(?m)^[ \t]*(?:pub\s+)?(?:struct|class)\s+\w+(?:\s*:\s*(?:public|private|protected)\s+\w+)?[^{;]*(?:\{|:)(?:\s*\n\s*[^(struct|class)\n][^\n]*)*",
+            r"(?m)^[ \t]*(?:class|interface|trait)\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+\w+(?:\s*,\s*\w+)*)?[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|interface|trait)\n][^\n]*)*",
         ]
 
         metadata = {"functions": [], "classes": []}
@@ -427,9 +438,13 @@ class CodeSleuth:
                     pattern,
                     file_path,
                 ]
+                logger.debug(f"Running ripgrep command: {' '.join(function_cmd)}")
                 function_result = subprocess.run(
                     function_cmd, text=True, capture_output=True, check=False
                 )
+                logger.debug(f"Ripgrep return code: {function_result.returncode}")
+                logger.debug(f"Ripgrep stdout: {function_result.stdout}")
+                logger.debug(f"Ripgrep stderr: {function_result.stderr}")
 
                 # Parse function results
                 if function_result.returncode in [
@@ -447,6 +462,7 @@ class CodeSleuth:
                                 line_text = (
                                     match_data.get("lines", {}).get("text", "").strip()
                                 )
+                                logger.debug(f"Found function: {line_text}")
 
                                 # Skip empty or private functions
                                 if not line_text or line_text.lstrip().startswith("_"):
@@ -470,9 +486,13 @@ class CodeSleuth:
                     pattern,
                     file_path,
                 ]
+                logger.debug(f"Running ripgrep command: {' '.join(class_cmd)}")
                 class_result = subprocess.run(
                     class_cmd, text=True, capture_output=True, check=False
                 )
+                logger.debug(f"Ripgrep return code: {class_result.returncode}")
+                logger.debug(f"Ripgrep stdout: {class_result.stdout}")
+                logger.debug(f"Ripgrep stderr: {class_result.stderr}")
 
                 # Parse class results
                 if class_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
@@ -487,6 +507,7 @@ class CodeSleuth:
                                 line_text = (
                                     match_data.get("lines", {}).get("text", "").strip()
                                 )
+                                logger.debug(f"Found class: {line_text}")
 
                                 # Skip empty or private classes
                                 if not line_text or line_text.lstrip().startswith("_"):
@@ -498,6 +519,7 @@ class CodeSleuth:
                         except json.JSONDecodeError:
                             continue
 
+            logger.debug(f"Final metadata: {metadata}")
             return metadata
 
         except Exception as e:

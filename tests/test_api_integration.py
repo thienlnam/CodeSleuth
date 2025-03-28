@@ -367,6 +367,127 @@ class TestCodeSleuthIntegration(unittest.TestCase):
             self.assertIn("id: String", user_struct)
             self.assertIn("username: String", user_struct)
 
+            # Test C++ code
+            cpp_metadata = self.codesleuth.get_code_metadata(
+                "src/services/calculator.cpp"
+            )
+            cpp_functions = cpp_metadata["functions"]
+            cpp_classes = cpp_metadata["classes"]
+            self.assertIsNotNone(cpp_functions, "C++ functions not found")
+            self.assertIsNotNone(cpp_classes, "C++ classes not found")
+
+            # Check C++ functions
+            self.assertTrue(
+                any("int add(int a, int b)" in func for func in cpp_functions)
+            )
+            self.assertTrue(
+                any(
+                    "inline double multiply(const double& a, const double& b) noexcept"
+                    in func
+                    for func in cpp_functions
+                )
+            )
+
+            # Check C++ classes
+            calculator_class = next(
+                (cls for cls in cpp_classes if "template<typename T>" in cls), None
+            )
+            self.assertIsNotNone(
+                calculator_class, "Template Calculator class not found"
+            )
+            self.assertIn(
+                "virtual T calculate(const T& a, const T& b) const = 0",
+                calculator_class,
+            )
+
+            basic_calculator_class = next(
+                (
+                    cls
+                    for cls in cpp_classes
+                    if "class BasicCalculator : public Calculator<int>" in cls
+                ),
+                None,
+            )
+            self.assertIsNotNone(
+                basic_calculator_class, "BasicCalculator class not found"
+            )
+            self.assertIn("virtual void reset() noexcept", basic_calculator_class)
+
+            advanced_calculator_class = next(
+                (
+                    cls
+                    for cls in cpp_classes
+                    if "class AdvancedCalculator : protected BasicCalculator, private Calculator<double>"
+                    in cls
+                ),
+                None,
+            )
+            self.assertIsNotNone(
+                advanced_calculator_class, "AdvancedCalculator class not found"
+            )
+            self.assertIn(
+                "double calculate(const double& a, const double& b) const override",
+                advanced_calculator_class,
+            )
+
+            # Test PHP-style code
+            php_metadata = self.codesleuth.get_code_metadata(
+                "src/services/UserManager.php"
+            )
+
+            # Check PHP functions
+            format_name_functions = [
+                f for f in php_metadata["functions"] if "function formatName" in f
+            ]
+            self.assertTrue(
+                len(format_name_functions) > 0,
+                "Should find at least one formatName function definition",
+            )
+            format_name_func = format_name_functions[0]
+            self.assertIn(
+                "function formatName(string $firstName, string $lastName): string",
+                format_name_func,
+            )
+            self.assertIn("return trim($firstName . ' ' . $lastName)", format_name_func)
+
+            # Check PHP classes
+            user_classes = [c for c in php_metadata["classes"] if "class User" in c]
+            self.assertTrue(
+                len(user_classes) > 0,
+                "Should find at least one User class definition",
+            )
+            user_class = user_classes[0]
+            self.assertIn("class User extends BaseUser", user_class)
+            self.assertIn("private string $firstName", user_class)
+            self.assertIn("private string $lastName", user_class)
+            self.assertIn("public function getFullName(): string", user_class)
+
+            # Check interface
+            interface_definitions = [
+                c for c in php_metadata["classes"] if "interface UserInterface" in c
+            ]
+            self.assertTrue(
+                len(interface_definitions) > 0,
+                "Should find at least one UserInterface definition",
+            )
+            interface_def = interface_definitions[0]
+            self.assertIn("interface UserInterface", interface_def)
+            self.assertIn("public function getId(): int", interface_def)
+            self.assertIn("public function getProfile(): ?array", interface_def)
+
+            # Check trait usage
+            user_manager_classes = [
+                c for c in php_metadata["classes"] if "class UserManager" in c
+            ]
+            self.assertTrue(
+                len(user_manager_classes) > 0,
+                "Should find at least one UserManager class definition",
+            )
+            user_manager_class = user_manager_classes[0]
+            self.assertIn("class UserManager", user_manager_class)
+            self.assertIn("use LoggerTrait", user_manager_class)
+            self.assertIn("private array $users = []", user_manager_class)
+
         except Exception as e:
             logger.error(f"Error in test_get_code_metadata: {e}", exc_info=True)
             raise
