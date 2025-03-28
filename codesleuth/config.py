@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 class EmbeddingModel(str, Enum):
     """Enum for supported embedding models."""
 
-    DISTILCODEBERT = "distilcodebert"
+    CODEBERT = "codebert"
 
 
 class VectorStore(str, Enum):
@@ -66,7 +66,7 @@ class IndexConfig(BaseModel):
     """Configuration for the semantic index."""
 
     model_name: EmbeddingModel = Field(
-        default=EmbeddingModel.DISTILCODEBERT,
+        default=EmbeddingModel.CODEBERT,
         description="Model to use for embeddings",
     )
     vector_store: VectorStore = Field(

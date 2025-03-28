@@ -23,7 +23,7 @@ from .parser import CodeChunk, CodeParser
 
 # Model names for HuggingFace
 MODEL_MAPPING = {
-    EmbeddingModel.DISTILCODEBERT: "microsoft/codebert-base",
+    EmbeddingModel.CODEBERT: "microsoft/codebert-base",
     # We can add more models here as needed
 }
 
