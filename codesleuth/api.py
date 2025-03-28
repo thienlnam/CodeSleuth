@@ -6,6 +6,9 @@ It combines semantic and lexical search for comprehensive code search.
 """
 
 from typing import Dict, List, Optional, Union, Any
+import os
+import json
+import subprocess
 
 from loguru import logger
 
@@ -191,6 +194,314 @@ class CodeSleuth:
 
         # Limit to top_k
         return combined[:top_k]
+
+    def view_file(
+        self,
+        file_path: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        context_lines: int = 5,
+    ) -> str:
+        """
+        Retrieve a snippet of file contents with optional line-range context.
+
+        Args:
+            file_path: Path to the file
+            start_line: Starting line number (optional)
+            end_line: Ending line number (optional)
+            context_lines: Number of surrounding lines for context
+
+        Returns:
+            Snippet of file contents
+        """
+        # Check if path is absolute before any path operations
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(str(self.config.repo_path), file_path)
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                lines = file.readlines()
+
+            # If no line range specified, return first few lines
+            if start_line is None and end_line is None:
+                return "".join(lines[: min(10, len(lines))])
+
+            # Calculate valid line range
+            total_lines = len(lines)
+
+            if start_line is None:
+                start_line = max(1, end_line - context_lines)
+            if end_line is None:
+                end_line = min(total_lines, start_line + context_lines)
+
+            # Adjust line numbers to be 0-indexed for list access
+            start_idx = max(0, start_line - 1)
+            end_idx = min(total_lines, end_line)
+
+            # Add context if requested
+            if context_lines > 0:
+                start_idx = max(0, start_idx - context_lines)
+                end_idx = min(total_lines, end_idx + context_lines)
+
+            # Extract the requested lines and join them
+            return "".join(lines[start_idx:end_idx])
+
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return f"Error reading file: {str(e)}"
+
+    def get_project_structure(self) -> Dict[str, Any]:
+        """
+        Return a structured representation of the project files and directories.
+
+        Returns:
+            Nested dictionary representing the project file structure.
+            On success, returns {"root": {<directory_structure>}}.
+            On failure, returns {"error": <error_message>}.
+        """
+
+        def build_tree(path: str) -> Optional[Dict[str, Any]]:
+            """Build a tree structure for the given path."""
+            result = {}
+            try:
+                # Resolve any symlinks and get absolute path
+                real_path = os.path.realpath(path)
+
+                # Verify the path exists and is accessible
+                if not os.path.exists(real_path):
+                    logger.error(f"Path does not exist: {real_path}")
+                    return None
+
+                # Verify it's a directory
+                if not os.path.isdir(real_path):
+                    logger.error(f"Path is not a directory: {real_path}")
+                    return None
+
+                # Try to list directory contents
+                try:
+                    items = os.listdir(real_path)
+                except PermissionError as e:
+                    logger.error(
+                        f"Permission denied accessing directory {real_path}: {e}"
+                    )
+                    return None
+                except OSError as e:
+                    logger.error(f"OS error accessing directory {real_path}: {e}")
+                    return None
+
+                # Process each item in the directory
+                for item in sorted(items):  # Sort for consistent ordering
+                    # Skip hidden files and directories
+                    if item.startswith("."):
+                        continue
+
+                    full_path = os.path.join(real_path, item)
+
+                    try:
+                        # Handle symlinks by resolving them
+                        if os.path.islink(full_path):
+                            real_item_path = os.path.realpath(full_path)
+                            # Skip if symlink points outside the repo
+                            if not real_item_path.startswith(
+                                str(self.config.repo_path)
+                            ):
+                                logger.debug(
+                                    f"Skipping symlink that points outside repo: {full_path}"
+                                )
+                                continue
+                            full_path = real_item_path
+
+                        if os.path.isdir(full_path):
+                            subtree = build_tree(full_path)
+                            if subtree is not None:  # Only add non-empty directories
+                                result[item] = subtree
+                        else:
+                            # Only include regular files
+                            if os.path.isfile(full_path):
+                                result[item] = None  # Files are leaf nodes
+                    except (PermissionError, OSError) as e:
+                        logger.error(f"Error accessing {full_path}: {e}")
+                        continue
+
+                return result if result else None  # Return None for empty directories
+
+            except Exception as e:
+                logger.error(f"Unexpected error building tree for {path}: {e}")
+                return None
+
+        try:
+            repo_path = str(self.config.repo_path)
+
+            # Initial repository checks
+            if not os.path.exists(repo_path):
+                msg = f"Repository path does not exist: {repo_path}"
+                logger.error(msg)
+                return {"error": msg}
+
+            if not os.path.isdir(repo_path):
+                msg = f"Repository path is not a directory: {repo_path}"
+                logger.error(msg)
+                return {"error": msg}
+
+            # Try to access the repository
+            try:
+                os.listdir(repo_path)
+            except PermissionError as e:
+                msg = f"Permission denied accessing repository {repo_path}: {e}"
+                logger.error(msg)
+                return {"error": msg}
+            except OSError as e:
+                msg = f"OS error accessing repository {repo_path}: {e}"
+                logger.error(msg)
+                return {"error": msg}
+
+            # Build the tree structure
+            tree = build_tree(repo_path)
+            if not tree:
+                msg = f"No files found in repository: {repo_path}"
+                logger.error(msg)
+                return {"error": msg}
+
+            return {"root": tree}
+
+        except Exception as e:
+            msg = f"Failed to get project structure: {e}"
+            logger.error(msg)
+            return {"error": msg}
+
+    def get_code_metadata(self, file_path: str) -> Dict[str, List[str]]:
+        """
+        Get metadata like functions and classes defined in a file.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Dictionary with keys ('functions', 'classes') listing names
+        """
+        # Resolve absolute path if necessary
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(str(self.config.repo_path), file_path)
+
+        metadata = {"functions": [], "classes": []}
+
+        try:
+            # Search for functions using ripgrep
+            function_cmd = [
+                "rg",
+                "--json",
+                "(function|def)\\s+(\\w+)\\s*\\(",
+                file_path,
+            ]
+            function_result = subprocess.run(
+                function_cmd, text=True, capture_output=True, check=False
+            )
+
+            # Search for classes using ripgrep
+            class_cmd = ["rg", "--json", "class\\s+(\\w+)", file_path]
+            class_result = subprocess.run(
+                class_cmd, text=True, capture_output=True, check=False
+            )
+
+            # Parse function results
+            if function_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
+                for line in function_result.stdout.splitlines():
+                    if not line or not line.strip():
+                        continue
+
+                    try:
+                        data = json.loads(line.strip())
+                        if data.get("type") == "match":
+                            match_data = data.get("data", {})
+                            submatches = match_data.get("submatches", [])
+
+                            if len(submatches) >= 2:  # We need at least 2 submatches
+                                # First submatch is the keyword (function/def), second is the name
+                                function_name = (
+                                    submatches[1].get("match", {}).get("text", "")
+                                )
+                                if (
+                                    function_name
+                                    and function_name not in metadata["functions"]
+                                ):
+                                    metadata["functions"].append(function_name)
+                    except json.JSONDecodeError:
+                        continue
+
+            # Parse class results
+            if class_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
+                for line in class_result.stdout.splitlines():
+                    if not line or not line.strip():
+                        continue
+
+                    try:
+                        data = json.loads(line.strip())
+                        if data.get("type") == "match":
+                            match_data = data.get("data", {})
+                            submatches = match_data.get("submatches", [])
+
+                            if submatches:
+                                class_name = (
+                                    submatches[0].get("match", {}).get("text", "")
+                                )
+                                if class_name and class_name not in metadata["classes"]:
+                                    metadata["classes"].append(class_name)
+                    except json.JSONDecodeError:
+                        continue
+
+            return metadata
+
+        except Exception as e:
+            logger.error(f"Failed to get code metadata for {file_path}: {e}")
+            return metadata
+
+    def search_references(
+        self, symbol: str, definition: bool = False, max_results: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Search where a given symbol (function, variable, class) is referenced or defined.
+
+        Args:
+            symbol: Symbol name to search for
+            definition: If True, search definitions only; otherwise, find references
+            max_results: Maximum number of results to return
+
+        Returns:
+            List of references or definitions with file and line information
+        """
+        if definition:
+            # Search for definitions (more specific patterns)
+            patterns = [
+                f"(function|def)\\s+{symbol}\\s*\\(",  # Function definition
+                f"class\\s+{symbol}\\b",  # Class definition
+                f"\\b(const|let|var)\\s+{symbol}\\b",  # Variable definition (JS/TS)
+                f"\\b[a-zA-Z_][a-zA-Z0-9_]*\\s+{symbol}\\b",  # Variable definition (other langs)
+            ]
+
+            all_results = []
+            for pattern in patterns:
+                results = self.search_lexically(
+                    pattern, max_results=max_results, case_sensitive=True
+                )
+                all_results.extend(results)
+
+            # Deduplicate and limit results
+            seen = set()
+            filtered_results = []
+            for result in all_results:
+                key = (result["file_path"], result["start_line"])
+                if key not in seen:
+                    seen.add(key)
+                    filtered_results.append(result)
+                    if len(filtered_results) >= max_results:
+                        break
+
+            return filtered_results
+        else:
+            # Search for all references of the symbol
+            return self.search_lexically(
+                f"\\b{symbol}\\b", max_results=max_results, case_sensitive=True
+            )
 
 
 def create_codesleuth(config: CodeSleuthConfig) -> CodeSleuth:
