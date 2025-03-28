@@ -85,10 +85,7 @@ class IndexConfig(BaseModel):
         default=False,
         description="Whether to use GPU for embedding computation",
     )
-    use_hnsw: bool = Field(
-        default=True,
-        description="Whether to use HNSW index for better performance on large repositories",
-    )
+    # HNSW index configuration
     hnsw_m: int = Field(
         default=16,
         description="Number of connections per node in HNSW index (higher = better recall, slower construction)",

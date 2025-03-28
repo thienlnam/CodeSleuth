@@ -171,32 +171,25 @@ class SemanticIndex:
         # Create directory if it doesn't exist
         self.index_path.mkdir(parents=True, exist_ok=True)
 
-        # Create FAISS index
-        # By default, use a flat L2 index for simplicity and accuracy
-        # For larger repositories, use HNSW index for better performance
+        # Create FAISS index with HNSW for better performance
         embedding_dim = 768  # CodeBERT embedding dimension
 
-        if self.config.use_hnsw:
-            # Create an HNSW index for better search performance
-            # Parameters from configuration
-            M = self.config.hnsw_m
-            efConstruction = self.config.hnsw_ef_construction
+        # Create an HNSW index for better search performance
+        # Parameters from configuration
+        M = self.config.hnsw_m
+        efConstruction = self.config.hnsw_ef_construction
 
-            # Create the HNSW index
-            hnsw_index = faiss.IndexHNSWFlat(embedding_dim, M, faiss.METRIC_L2)
-            hnsw_index.hnsw.efConstruction = efConstruction
-            hnsw_index.hnsw.efSearch = self.config.hnsw_ef_search
+        # Create the HNSW index
+        hnsw_index = faiss.IndexHNSWFlat(embedding_dim, M, faiss.METRIC_L2)
+        hnsw_index.hnsw.efConstruction = efConstruction
+        hnsw_index.hnsw.efSearch = self.config.hnsw_ef_search
 
-            # Wrap with IndexIDMap to support add_with_ids
-            self.index = faiss.IndexIDMap(hnsw_index)
+        # Wrap with IndexIDMap to support add_with_ids
+        self.index = faiss.IndexIDMap(hnsw_index)
 
-            logger.info(
-                f"Created new HNSW index with dimension {embedding_dim}, M={M}, efConstruction={efConstruction}"
-            )
-        else:
-            # Use a simple flat index for smaller repositories
-            self.index = faiss.IndexFlatL2(embedding_dim)
-            logger.info(f"Created new flat index with dimension {embedding_dim}")
+        logger.info(
+            f"Created new HNSW index with dimension {embedding_dim}, M={M}, efConstruction={efConstruction}"
+        )
 
     def _save_index(self):
         """Save the index and metadata to disk."""
@@ -226,23 +219,13 @@ class SemanticIndex:
         # Load metadata
         metadata_file = self.index_path / "metadata.pkl"
         with open(metadata_file, "rb") as f:
-            try:
-                # Try to load with reusable_ids (newer version)
-                self.metadata, self.next_id, self.reusable_ids = pickle.load(f)
-            except ValueError:
-                # Fall back to loading without reusable_ids (older version)
-                self.metadata, self.next_id = pickle.load(f)
-                self.reusable_ids = set()
+            self.metadata, self.next_id, self.reusable_ids = pickle.load(f)
 
-        # Configure HNSW search parameters if using HNSW index
-        if self.config.use_hnsw:
-            # The wrapped index is accessed through .index if this is an IndexIDMap
-            if isinstance(self.index, faiss.IndexIDMap):
-                if isinstance(self.index.index, faiss.IndexHNSWFlat):
-                    self.index.index.hnsw.efSearch = self.config.hnsw_ef_search
-            # Direct HNSW index
-            elif isinstance(self.index, faiss.IndexHNSWFlat):
-                self.index.hnsw.efSearch = self.config.hnsw_ef_search
+        # Set HNSW search parameter
+        if isinstance(self.index, faiss.IndexIDMap) and isinstance(
+            self.index.index, faiss.IndexHNSWFlat
+        ):
+            self.index.index.hnsw.efSearch = self.config.hnsw_ef_search
 
         logger.info(
             f"Loaded index with {self.index.ntotal} vectors from {self.index_path}"

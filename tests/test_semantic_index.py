@@ -55,9 +55,7 @@ def test_index_config(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("index")
     config = IndexConfig()
     config.index_path = temp_dir
-    # Use HNSW index for better performance
-    config.use_hnsw = True
-    # Use smaller values for faster testing
+    # Use smaller HNSW values for faster testing
     config.hnsw_m = 8
     config.hnsw_ef_construction = 64
     config.hnsw_ef_search = 32
