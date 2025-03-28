@@ -15,6 +15,7 @@ class EmbeddingModel(str, Enum):
     """Enum for supported embedding models."""
 
     CODEBERT = "codebert"
+    E5_SMALL = "e5-small-v2"
 
 
 class VectorStore(str, Enum):

@@ -399,71 +399,104 @@ class CodeSleuth:
         if not os.path.isabs(file_path):
             file_path = os.path.join(str(self.config.repo_path), file_path)
 
+        # Search for functions using ripgrep with generic patterns
+        function_patterns = [
+            # Generic function/method definitions with context
+            r"(?m)^[ \t]*(?:def|function|fn|func)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^def\n][^\n]*)*",  # Common function keywords
+            r"(?m)^[ \t]*(?:public|private|protected|static|async)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(public|private|protected|static|async)\n][^\n]*)*",  # Method modifiers
+            r"(?m)^[ \t]*(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>.*(?:\{|:)(?:\s*\n\s*[^(const|let|var)\n][^\n]*)*",  # Arrow functions
+        ]
+
+        # Search for classes using generic patterns
+        class_patterns = [
+            r"(?m)^[ \t]*(?:export\s+)?(?:abstract\s+)?(?:class|struct|type\s+\w+\s+struct)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|struct|type)\n][^\n]*)*",  # Class-like definitions
+        ]
+
         metadata = {"functions": [], "classes": []}
 
         try:
-            # Search for functions using ripgrep
-            function_cmd = [
-                "rg",
-                "--json",
-                "(function|def)\\s+(\\w+)\\s*\\(",
-                file_path,
-            ]
-            function_result = subprocess.run(
-                function_cmd, text=True, capture_output=True, check=False
-            )
+            # Search for functions with smart case and multiline support
+            for pattern in function_patterns:
+                function_cmd = [
+                    "rg",
+                    "--smart-case",  # Smart case matching
+                    "--json",  # JSON output for reliable parsing
+                    "--multiline",  # Handle multiline matches
+                    "--only-matching",  # Only return the matched pattern
+                    "--multiline-dotall",  # Make . match newlines
+                    pattern,
+                    file_path,
+                ]
+                function_result = subprocess.run(
+                    function_cmd, text=True, capture_output=True, check=False
+                )
 
-            # Search for classes using ripgrep
-            class_cmd = ["rg", "--json", "class\\s+(\\w+)", file_path]
-            class_result = subprocess.run(
-                class_cmd, text=True, capture_output=True, check=False
-            )
+                # Parse function results
+                if function_result.returncode in [
+                    0,
+                    1,
+                ]:  # 0=matches found, 1=no matches
+                    for line in function_result.stdout.splitlines():
+                        if not line or not line.strip():
+                            continue
 
-            # Parse function results
-            if function_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
-                for line in function_result.stdout.splitlines():
-                    if not line or not line.strip():
-                        continue
-
-                    try:
-                        data = json.loads(line.strip())
-                        if data.get("type") == "match":
-                            match_data = data.get("data", {})
-                            submatches = match_data.get("submatches", [])
-
-                            if len(submatches) >= 2:  # We need at least 2 submatches
-                                # First submatch is the keyword (function/def), second is the name
-                                function_name = (
-                                    submatches[1].get("match", {}).get("text", "")
+                        try:
+                            data = json.loads(line.strip())
+                            if data.get("type") == "match":
+                                match_data = data.get("data", {})
+                                line_text = (
+                                    match_data.get("lines", {}).get("text", "").strip()
                                 )
-                                if (
-                                    function_name
-                                    and function_name not in metadata["functions"]
-                                ):
-                                    metadata["functions"].append(function_name)
-                    except json.JSONDecodeError:
-                        continue
 
-            # Parse class results
-            if class_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
-                for line in class_result.stdout.splitlines():
-                    if not line or not line.strip():
-                        continue
+                                # Skip empty or private functions
+                                if not line_text or line_text.lstrip().startswith("_"):
+                                    continue
 
-                    try:
-                        data = json.loads(line.strip())
-                        if data.get("type") == "match":
-                            match_data = data.get("data", {})
-                            submatches = match_data.get("submatches", [])
+                                # Add the signature if not already present
+                                if line_text not in metadata["functions"]:
+                                    metadata["functions"].append(line_text)
+                        except json.JSONDecodeError:
+                            continue
 
-                            if submatches:
-                                class_name = (
-                                    submatches[0].get("match", {}).get("text", "")
+            # Search for classes
+            for pattern in class_patterns:
+                class_cmd = [
+                    "rg",
+                    "--smart-case",  # Smart case matching
+                    "--json",  # JSON output for reliable parsing
+                    "--multiline",  # Handle multiline matches
+                    "--only-matching",  # Only return the matched pattern
+                    "--multiline-dotall",  # Make . match newlines
+                    pattern,
+                    file_path,
+                ]
+                class_result = subprocess.run(
+                    class_cmd, text=True, capture_output=True, check=False
+                )
+
+                # Parse class results
+                if class_result.returncode in [0, 1]:  # 0=matches found, 1=no matches
+                    for line in class_result.stdout.splitlines():
+                        if not line or not line.strip():
+                            continue
+
+                        try:
+                            data = json.loads(line.strip())
+                            if data.get("type") == "match":
+                                match_data = data.get("data", {})
+                                line_text = (
+                                    match_data.get("lines", {}).get("text", "").strip()
                                 )
-                                if class_name and class_name not in metadata["classes"]:
-                                    metadata["classes"].append(class_name)
-                    except json.JSONDecodeError:
-                        continue
+
+                                # Skip empty or private classes
+                                if not line_text or line_text.lstrip().startswith("_"):
+                                    continue
+
+                                # Add the signature if not already present
+                                if line_text not in metadata["classes"]:
+                                    metadata["classes"].append(line_text)
+                        except json.JSONDecodeError:
+                            continue
 
             return metadata
 
