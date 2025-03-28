@@ -409,7 +409,7 @@ class CodeSleuth:
 
         # Search for classes using generic patterns
         class_patterns = [
-            r"(?m)^[ \t]*(?:export\s+)?(?:abstract\s+)?(?:class|struct|type\s+\w+\s+struct)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|struct|type)\n][^\n]*)*",  # Class-like definitions
+            r"(?m)^[ \t]*(?:pub\s+)?(?:export\s+)?(?:abstract\s+)?(?:class|struct|type\s+\w+\s+struct)\s+\w+[^{;]*(?:\{|:)(?:\s*\n\s*[^(class|struct|type)\n][^\n]*)*",  # Class-like definitions
         ]
 
         metadata = {"functions": [], "classes": []}
