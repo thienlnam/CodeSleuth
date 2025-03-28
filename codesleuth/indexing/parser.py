@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from loguru import logger
-from tree_sitter import Language, Parser, Tree
+from tree_sitter import Tree
+from tree_sitter_language_pack import get_language, get_parser
 
 from ..config import CodeSleuthConfig, ParserConfig
 
@@ -33,140 +34,40 @@ class TreeSitterManager:
     """Manages Tree-sitter language parsers."""
 
     # Map of supported languages to their grammar repositories
-    LANGUAGE_REPOS = {
-        "python": "tree-sitter-python",
-        "javascript": "tree-sitter-javascript",
-        "typescript": "tree-sitter-typescript",
-        "php": "tree-sitter-php",
-        "cpp": "tree-sitter-cpp",
-        "c": "tree-sitter-c",
-        "java": "tree-sitter-java",
-        "go": "tree-sitter-go",
-        "rust": "tree-sitter-rust",
-    }
-
-    REPO_URLS = {
-        "tree-sitter-python": "https://github.com/tree-sitter/tree-sitter-python",
-        "tree-sitter-javascript": "https://github.com/tree-sitter/tree-sitter-javascript",
-        "tree-sitter-typescript": "https://github.com/tree-sitter/tree-sitter-typescript",
-        "tree-sitter-php": "https://github.com/tree-sitter/tree-sitter-php",
-        "tree-sitter-cpp": "https://github.com/tree-sitter/tree-sitter-cpp",
-        "tree-sitter-c": "https://github.com/tree-sitter/tree-sitter-c",
-        "tree-sitter-java": "https://github.com/tree-sitter/tree-sitter-java",
-        "tree-sitter-go": "https://github.com/tree-sitter/tree-sitter-go",
-        "tree-sitter-rust": "https://github.com/tree-sitter/tree-sitter-rust",
-    }
+    SUPPORTED_LANGUAGES = [
+        "python",
+        "javascript",
+        "typescript",
+        "php",
+        "cpp",
+        "c",
+        "java",
+        "go",
+        "rust",
+    ]
 
     def __init__(self):
         """Initialize the TreeSitterManager."""
-        self.languages: Dict[str, Language] = {}
-        self.parsers: Dict[str, Parser] = {}
-        self.build_dir = Path(__file__).parent / "build"
-        self.build_dir.mkdir(exist_ok=True, parents=True)
-        self.language_so = self.build_dir / "languages.so"
+        self.languages = {}
+        self.parsers = {}
         self._setup_languages()
 
     def _setup_languages(self):
-        """Set up Tree-sitter languages."""
-        # Check if we need to build language library
-        needs_build = not self.language_so.exists()
-
-        # If languages.so exists, try to load languages
-        if not needs_build:
+        """Set up Tree-sitter languages from tree-sitter-language-pack."""
+        for lang_name in self.SUPPORTED_LANGUAGES:
             try:
-                self._load_languages_from_so()
-            except Exception as e:
-                logger.warning(f"Failed to load languages from shared library: {e}")
-                needs_build = True
+                # Get language and parser from tree-sitter-language-pack
+                language = get_language(lang_name)
+                parser = get_parser(lang_name)
 
-        # Build language library if needed
-        if needs_build:
-            logger.info("Building Tree-sitter language library...")
-            self._build_languages()
-            try:
-                self._load_languages_from_so()
-            except Exception as e:
-                logger.error(f"Failed to load languages after building: {e}")
-
-        # Create parsers for available languages
-        for lang_name, lang in self.languages.items():
-            parser = Parser()
-            parser.set_language(lang)
-            self.parsers[lang_name] = parser
-            logger.info(f"Loaded parser for {lang_name}")
-
-    def _load_languages_from_so(self):
-        """Load languages from the shared library."""
-        for lang_name in self.LANGUAGE_REPOS:
-            try:
-                lang = Language(self.language_so, lang_name)
-                self.languages[lang_name] = lang
-                logger.info(f"Loaded language {lang_name} from shared library")
+                # Store them in our dictionaries
+                self.languages[lang_name] = language
+                self.parsers[lang_name] = parser
+                logger.info(f"Loaded parser for {lang_name}")
             except Exception as e:
                 logger.warning(f"Failed to load language {lang_name}: {e}")
 
-    def _build_languages(self):
-        """
-        Build the languages shared library.
-
-        Note: This is a simplified version that assumes git and build tools are available.
-        In a real implementation, this would need more robust error handling and possibly
-        platform-specific code.
-        """
-        import subprocess
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-
-            # Build each language
-            successfully_built = []
-
-            for lang_name, repo_name in self.LANGUAGE_REPOS.items():
-                repo_url = self.REPO_URLS.get(repo_name)
-                if not repo_url:
-                    logger.warning(f"No repository URL found for {repo_name}")
-                    continue
-
-                try:
-                    logger.info(f"Cloning {repo_name}...")
-                    subprocess.run(
-                        ["git", "clone", "--depth=1", repo_url, tmp_path / repo_name],
-                        check=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-
-                    # Special case for TypeScript which has multiple parsers
-                    if lang_name == "typescript":
-                        lang_dir = tmp_path / repo_name / "typescript"
-                    else:
-                        lang_dir = tmp_path / repo_name
-
-                    # Add this language to be built
-                    successfully_built.append((lang_name, lang_dir))
-
-                except Exception as e:
-                    logger.error(f"Failed to clone {repo_name}: {e}")
-
-            # Now build the languages
-            if successfully_built:
-                try:
-                    from tree_sitter import build_library
-
-                    # Build the library with the languages we successfully cloned
-                    language_dirs = [
-                        str(lang_dir) for _, lang_dir in successfully_built
-                    ]
-                    build_library(self.language_so, language_dirs)
-
-                    logger.info(
-                        f"Successfully built languages: {[lang for lang, _ in successfully_built]}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to build language library: {e}")
-
-    def get_parser(self, language: str) -> Optional[Parser]:
+    def get_parser(self, language: str) -> Optional[object]:
         """
         Get a parser for the specified language.
 
@@ -373,22 +274,42 @@ class CodeParser:
 
                 # Group captures by their node to find function/method definitions
                 nodes_with_names = {}
-                for capture, capture_name in captures:
-                    node_id = id(capture)
-                    if node_id not in nodes_with_names:
-                        nodes_with_names[node_id] = {"node": capture, "captures": {}}
+                # The structure of captures might be different in tree-sitter-language-pack
+                # Handle both formats: (node, name) tuples or objects with node and name attributes
+                for capture in captures:
+                    try:
+                        if isinstance(capture, tuple) and len(capture) == 2:
+                            # Original format: (node, name)
+                            node, capture_name = capture
+                        else:
+                            # New format might be an object with attributes
+                            node = (
+                                capture.node if hasattr(capture, "node") else capture[0]
+                            )
+                            capture_name = (
+                                capture.name if hasattr(capture, "name") else capture[1]
+                            )
 
-                    if capture_name.endswith("_name"):
-                        nodes_with_names[node_id]["captures"][capture_name] = (
-                            capture.text.decode("utf-8")
+                        node_id = id(node)
+                        if node_id not in nodes_with_names:
+                            nodes_with_names[node_id] = {"node": node, "captures": {}}
+
+                        if capture_name.endswith("_name"):
+                            nodes_with_names[node_id]["captures"][capture_name] = (
+                                node.text.decode("utf-8")
+                            )
+                        elif capture_name in [
+                            "function",
+                            "method",
+                            "class",
+                            "arrow_function",
+                        ]:
+                            nodes_with_names[node_id]["type"] = capture_name
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing query capture: {e} - Capture: {capture}"
                         )
-                    elif capture_name in [
-                        "function",
-                        "method",
-                        "class",
-                        "arrow_function",
-                    ]:
-                        nodes_with_names[node_id]["type"] = capture_name
+                        continue
 
                 # Create chunks for each function/method
                 for node_data in nodes_with_names.values():

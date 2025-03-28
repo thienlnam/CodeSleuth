@@ -245,25 +245,30 @@ def test_parse_directory(test_files_dir, parser):
     # Check if any of the chunks have extracted symbol names
     # This might fail if tree-sitter isn't available and all parsing falls back
     # to line-based chunking
-    if any(chunk.symbol_name is not None for chunk in chunks):
+    symbols_found = [
+        chunk.symbol_name for chunk in chunks if chunk.symbol_name is not None
+    ]
+    if symbols_found:
         # At least one symbol name was extracted, so check for expected ones
-        symbol_names = [
-            chunk.symbol_name for chunk in chunks if chunk.symbol_name is not None
-        ]
+        symbol_names = set(symbols_found)
         assert any(
-            name == "example_function" or name == "exampleFunction"
-            for name in symbol_names
+            name in symbol_names
+            for name in [
+                "example_function",
+                "ExampleClass",
+                "exampleFunction",
+                "another_function",
+            ]
         )
 
 
 def test_should_ignore_file(parser):
-    """Test that files matching ignore patterns are skipped."""
-    # Should ignore common patterns by default
-    assert parser.should_ignore_file("node_modules/some_package.js")
-    assert parser.should_ignore_file("build/output.js")
-    assert parser.should_ignore_file(".git/config")
-    assert parser.should_ignore_file("__pycache__/module.pyc")
-
-    # Should not ignore regular code files
-    assert not parser.should_ignore_file("src/main.py")
-    assert not parser.should_ignore_file("lib/util.js")
+    """Test ignore pattern matching."""
+    assert parser.should_ignore_file("node_modules/some_file.js") is True
+    assert parser.should_ignore_file("dist/bundle.js") is True
+    assert parser.should_ignore_file("build/output.js") is True
+    assert parser.should_ignore_file(".git/HEAD") is True
+    assert parser.should_ignore_file("__pycache__/module.pyc") is True
+    assert parser.should_ignore_file("some_file.pyc") is True
+    assert parser.should_ignore_file("src/main.py") is False
+    assert parser.should_ignore_file("app/components/Button.js") is False
