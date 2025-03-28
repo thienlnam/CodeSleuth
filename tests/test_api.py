@@ -42,7 +42,7 @@ class TestCodeSleuthAPI(unittest.TestCase):
 
     def test_search_semantically(self):
         """Test semantic search through the API."""
-        # Mock search results
+        # Mock search results with varying similarity scores
         semantic_results = [
             {
                 "file_path": "/test/repo/file1.py",
@@ -52,18 +52,32 @@ class TestCodeSleuthAPI(unittest.TestCase):
                 "code": "def test_function():\n    return 'test'",
                 "similarity": 0.9,
                 "source": "semantic",
-            }
+            },
+            {
+                "file_path": "/test/repo/file2.py",
+                "start_line": 15,
+                "end_line": 25,
+                "symbol_name": "another_function",
+                "code": "def another_function():\n    return 'test'",
+                "similarity": 0.5,
+                "source": "semantic",
+            },
         ]
         self.mock_semantic_search.search.return_value = semantic_results
 
-        # Perform the search
+        # Test without similarity threshold
         results = self.api.search_semantically("test query", top_k=5)
+        self.assertEqual(results, semantic_results)
+
+        # Test with similarity threshold
+        results = self.api.search_semantically(
+            "test query", top_k=5, similarity_threshold=0.7
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["similarity"], 0.9)
 
         # Check that the semantic search was called with the right parameters
-        self.mock_semantic_search.search.assert_called_once_with("test query", top_k=5)
-
-        # Verify the results match the mock results
-        self.assertEqual(results, semantic_results)
+        self.mock_semantic_search.search.assert_called_with("test query", top_k=5)
 
     def test_search_lexically(self):
         """Test lexical search through the API."""
@@ -104,8 +118,8 @@ class TestCodeSleuthAPI(unittest.TestCase):
         # Verify the results match the mock results
         self.assertEqual(results, lexical_results)
 
-    def test_search_function(self):
-        """Test function search through the API."""
+    def test_search_function_definitions(self):
+        """Test function definition search through the API."""
         # Mock search results
         function_results = [
             {
@@ -118,20 +132,29 @@ class TestCodeSleuthAPI(unittest.TestCase):
                 "matched_text": "def test_function():",
                 "similarity": 1.0,
                 "source": "lexical",
-            }
+            },
+            {
+                "file_path": "/test/repo/file2.py",
+                "start_line": 15,
+                "end_line": 25,
+                "symbol_name": None,
+                "code": "def another_function():\n    return 'test'",
+                "match_line": 15,
+                "matched_text": "def another_function():",
+                "similarity": 0.5,
+                "source": "lexical",
+            },
         ]
         self.mock_lexical_search.search_function.return_value = function_results
 
-        # Perform the search
-        results = self.api.search_function("test_function", max_results=10)
+        # Test function definition search
+        results = self.api.search_function_definitions("test_function", max_results=10)
+        self.assertEqual(results, function_results)
 
         # Check that the function search was called with the right parameters
-        self.mock_lexical_search.search_function.assert_called_once_with(
+        self.mock_lexical_search.search_function.assert_called_with(
             "test_function", max_results=10
         )
-
-        # Verify the results match the mock results
-        self.assertEqual(results, function_results)
 
     def test_search_file(self):
         """Test file search through the API."""

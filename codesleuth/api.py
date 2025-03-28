@@ -53,13 +53,17 @@ class CodeSleuth:
         index_repository(self.config, parser, self.semantic_search.semantic_index)
         logger.info("Repository indexed successfully")
 
-    def search_semantically(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search_semantically(
+        self, query: str, top_k: int = 10, similarity_threshold: float = 0.0
+    ) -> List[Dict[str, Any]]:
         """
         Search for code semantically.
 
         Args:
             query: Query string
             top_k: Number of results to return
+            similarity_threshold: Minimum similarity score (0.0 to 1.0) for results.
+                               Results below this threshold will be filtered out.
 
         Returns:
             List of search results. If semantic search is not available,
@@ -71,7 +75,17 @@ class CodeSleuth:
             )
             return self.search_lexically(query, max_results=top_k)
 
-        return self.semantic_search.search(query, top_k=top_k)
+        results = self.semantic_search.search(query, top_k=top_k)
+
+        # Filter results based on similarity threshold
+        if similarity_threshold > 0.0:
+            results = [
+                result
+                for result in results
+                if result.get("similarity", 0.0) >= similarity_threshold
+            ]
+
+        return results
 
     def search_lexically(
         self,
@@ -102,8 +116,10 @@ class CodeSleuth:
             exclude_pattern=exclude_pattern,
         )
 
-    def search_function(
-        self, function_name: str, max_results: int = 20
+    def search_function_definitions(
+        self,
+        function_name: str,
+        max_results: int = 20,
     ) -> List[Dict[str, Any]]:
         """
         Search for function definitions.
@@ -113,7 +129,7 @@ class CodeSleuth:
             max_results: Maximum number of results to return
 
         Returns:
-            List of search results
+            List of search results containing function definitions
         """
         return self.lexical_search.search_function(
             function_name, max_results=max_results
