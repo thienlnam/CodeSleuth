@@ -182,9 +182,14 @@ class SemanticIndex:
             M = self.config.hnsw_m
             efConstruction = self.config.hnsw_ef_construction
 
-            self.index = faiss.IndexHNSWFlat(embedding_dim, M, faiss.METRIC_L2)
-            self.index.hnsw.efConstruction = efConstruction
-            self.index.hnsw.efSearch = self.config.hnsw_ef_search
+            # Create the HNSW index
+            hnsw_index = faiss.IndexHNSWFlat(embedding_dim, M, faiss.METRIC_L2)
+            hnsw_index.hnsw.efConstruction = efConstruction
+            hnsw_index.hnsw.efSearch = self.config.hnsw_ef_search
+
+            # Wrap with IndexIDMap to support add_with_ids
+            self.index = faiss.IndexIDMap(hnsw_index)
+
             logger.info(
                 f"Created new HNSW index with dimension {embedding_dim}, M={M}, efConstruction={efConstruction}"
             )
@@ -230,8 +235,14 @@ class SemanticIndex:
                 self.reusable_ids = set()
 
         # Configure HNSW search parameters if using HNSW index
-        if isinstance(self.index, faiss.IndexHNSWFlat):
-            self.index.hnsw.efSearch = self.config.hnsw_ef_search
+        if self.config.use_hnsw:
+            # The wrapped index is accessed through .index if this is an IndexIDMap
+            if isinstance(self.index, faiss.IndexIDMap):
+                if isinstance(self.index.index, faiss.IndexHNSWFlat):
+                    self.index.index.hnsw.efSearch = self.config.hnsw_ef_search
+            # Direct HNSW index
+            elif isinstance(self.index, faiss.IndexHNSWFlat):
+                self.index.hnsw.efSearch = self.config.hnsw_ef_search
 
         logger.info(
             f"Loaded index with {self.index.ntotal} vectors from {self.index_path}"
@@ -354,8 +365,7 @@ class SemanticIndex:
         """Rebuild the index with only the remaining chunks."""
         if not self.metadata:
             # If no metadata is left, create a new empty index
-            embedding_dim = 768  # CodeBERT embedding dimension
-            self.index = faiss.IndexFlatL2(embedding_dim)
+            self._create_index()
             self.next_id = 0
             return
 
@@ -368,9 +378,12 @@ class SemanticIndex:
         codes = [chunk.code for chunk in all_chunks]
         embeddings = self.embedder.embed_batch(codes, batch_size=self.config.batch_size)
 
-        # Create new index
+        # Create new index of the same type as the current one
         embedding_dim = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(embedding_dim)
+
+        # Create a new index with the same configuration as before
+        old_index = self.index
+        self._create_index()
 
         # Add embeddings with their original IDs
         self.index.add_with_ids(embeddings, np.array(all_ids))
