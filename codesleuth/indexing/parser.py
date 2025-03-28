@@ -204,14 +204,15 @@ class TreeSitterManager:
 class CodeParser:
     """Parser for code files."""
 
-    def __init__(self, config: ParserConfig):
+    def __init__(self, config: CodeSleuthConfig):
         """
         Initialize the CodeParser.
 
         Args:
-            config: Parser configuration
+            config: CodeSleuth configuration
         """
         self.config = config
+        self.parser_config = config.parser
         self.tree_sitter_manager = TreeSitterManager()
 
     def get_language_for_file(self, file_path: Union[str, Path]) -> Optional[str]:
@@ -225,7 +226,7 @@ class CodeParser:
             Language name or None if unknown
         """
         ext = os.path.splitext(str(file_path))[1].lower()
-        return self.config.extension_to_language.get(ext)
+        return self.parser_config.extension_to_language.get(ext)
 
     def should_ignore_file(self, file_path: Union[str, Path]) -> bool:
         """
@@ -238,7 +239,7 @@ class CodeParser:
             True if the file should be ignored, False otherwise
         """
         str_path = str(file_path)
-        for pattern in self.config.ignore_patterns:
+        for pattern in self.parser_config.ignore_patterns:
             if re.search(pattern, str_path):
                 return True
         return False
@@ -610,9 +611,11 @@ class CodeParser:
 
         # Create chunks with overlap
         for i in range(
-            0, total_lines, self.config.chunk_size - self.config.chunk_overlap
+            0,
+            total_lines,
+            self.parser_config.chunk_size - self.parser_config.chunk_overlap,
         ):
-            end_line = min(i + self.config.chunk_size, total_lines)
+            end_line = min(i + self.parser_config.chunk_size, total_lines)
             chunk_lines = lines[i:end_line]
             chunk_text = "".join(chunk_lines)
 
@@ -680,4 +683,4 @@ def create_parser(config: CodeSleuthConfig) -> CodeParser:
     Returns:
         CodeParser instance
     """
-    return CodeParser(config.parser)
+    return CodeParser(config)
