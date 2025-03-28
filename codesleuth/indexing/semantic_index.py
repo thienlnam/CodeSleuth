@@ -27,8 +27,18 @@ from .parser import CodeChunk, CodeParser
 # Model names for HuggingFace
 MODEL_MAPPING = {
     EmbeddingModel.CODEBERT: "microsoft/codebert-base",
+    EmbeddingModel.E5_SMALL: "intfloat/e5-small-v2",
     # We can add more models here as needed
 }
+
+# Import MLX Embedding Models
+try:
+    from mlx_embedding_models.embedding import EmbeddingModel as MLXEmbeddingModel
+
+    MLX_AVAILABLE = True
+except ImportError:
+    MLX_AVAILABLE = False
+    logger.warning("MLX Embedding Models not available, falling back to PyTorch")
 
 
 @dataclass
@@ -51,21 +61,35 @@ class CodeEmbedder:
             model_name: Name of the model to use
             use_gpu: Whether to use GPU for embedding computation
         """
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
-        )
-        logger.info(f"Using device: {self.device}")
+        # Detect Python 3.13 on M1/M2 Macs for compatibility issues
+        is_python_3_13 = sys.version_info.major == 3 and sys.version_info.minor == 13
+        is_apple_silicon = platform.processor() == "arm"
+        problematic_environment = is_python_3_13 and is_apple_silicon
 
-        # Load tokenizer and model
-        model_hf_name = MODEL_MAPPING.get(model_name, model_name)
-        logger.info(f"Loading model: {model_hf_name}")
+        # Use MLX on Apple Silicon if available
+        if problematic_environment and MLX_AVAILABLE:
+            logger.info("Using MLX Embedding Models for Apple Silicon compatibility")
+            self.use_mlx = True
+            self.device = None  # MLX handles device management
+            self.model = MLXEmbeddingModel.from_registry(model_name)
+            self.tokenizer = None  # MLX handles tokenization
+        else:
+            self.use_mlx = False
+            self.device = torch.device(
+                "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
+            )
+            logger.info(f"Using device: {self.device}")
 
-        # Load the model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(model_hf_name)
-        self.model = AutoModel.from_pretrained(model_hf_name).to(self.device)
+            # Load tokenizer and model
+            model_hf_name = MODEL_MAPPING.get(model_name, model_name)
+            logger.info(f"Loading model: {model_hf_name}")
 
-        # Set model to evaluation mode
-        self.model.eval()
+            # Load the model and tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(model_hf_name)
+            self.model = AutoModel.from_pretrained(model_hf_name).to(self.device)
+
+            # Set model to evaluation mode
+            self.model.eval()
 
     def embed(self, code: str) -> np.ndarray:
         """
@@ -81,21 +105,25 @@ class CodeEmbedder:
             RuntimeError: If embedding fails
         """
         try:
-            # Tokenize the code
-            inputs = self.tokenizer(
-                code,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512,
-            ).to(self.device)
+            if self.use_mlx:
+                # MLX handles tokenization and embedding
+                embeddings = self.model.encode([code])
+                return embeddings[0]
+            else:
+                # PyTorch path
+                inputs = self.tokenizer(
+                    code,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                ).to(self.device)
 
-            # Compute embeddings
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
 
-            return embeddings[0]
+                return embeddings[0]
         except Exception as e:
             logger.error(f"Error embedding code: {e}")
             raise
@@ -114,28 +142,32 @@ class CodeEmbedder:
         Raises:
             RuntimeError: If batch embedding fails
         """
-        all_embeddings = []
+        if self.use_mlx:
+            # MLX handles batching internally
+            return self.model.encode(codes)
+        else:
+            all_embeddings = []
 
-        for i in range(0, len(codes), batch_size):
-            batch = codes[i : i + batch_size]
+            for i in range(0, len(codes), batch_size):
+                batch = codes[i : i + batch_size]
 
-            # Tokenize the batch
-            inputs = self.tokenizer(
-                batch,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512,
-            ).to(self.device)
+                # Tokenize the batch
+                inputs = self.tokenizer(
+                    batch,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                ).to(self.device)
 
-            # Compute embeddings
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                # Compute embeddings
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
 
-            all_embeddings.append(embeddings)
+                all_embeddings.append(embeddings)
 
-        return np.vstack(all_embeddings) if all_embeddings else np.array([])
+            return np.vstack(all_embeddings) if all_embeddings else np.array([])
 
 
 class SemanticIndex:
@@ -207,8 +239,11 @@ class SemanticIndex:
         # Create directory if it doesn't exist
         self.index_path.mkdir(parents=True, exist_ok=True)
 
-        # Create FAISS index with HNSW for better performance
-        embedding_dim = 768  # CodeBERT embedding dimension
+        # Get embedding dimension based on model
+        if self.config.model_name == EmbeddingModel.E5_SMALL:
+            embedding_dim = 384  # E5-small-v2 embedding dimension
+        else:
+            embedding_dim = 768  # CodeBERT embedding dimension
 
         # Detect Python 3.13 on M1/M2 Macs for compatibility issues
         is_python_3_13 = sys.version_info.major == 3 and sys.version_info.minor == 13
