@@ -5,6 +5,7 @@ This module provides lexical code search capabilities using ripgrep (rg)
 for efficient and precise pattern matching.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -121,11 +122,12 @@ class LexicalSearch:
 
         # Process each line of JSON output
         for line in output.splitlines():
-            if not line:
+            if not line or not line.strip():
                 continue
 
             try:
-                data = eval(line)  # Simple JSON parsing
+                # Use json.loads instead of eval for safety
+                data = json.loads(line.strip())
                 match_type = data.get("type")
 
                 if match_type == "begin":
@@ -211,8 +213,11 @@ class LexicalSearch:
 
                     current_match = None
 
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing ripgrep JSON output: {e}")
+                continue
             except Exception as e:
-                logger.error(f"Error parsing ripgrep output: {e}")
+                logger.error(f"Error processing ripgrep output: {e}")
                 continue
 
         return results
