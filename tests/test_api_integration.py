@@ -141,26 +141,6 @@ class TestCodeSleuthIntegration(unittest.TestCase):
             logger.error(f"Error in test_lexical_search: {e}", exc_info=True)
             raise
 
-    def test_hybrid_search(self):
-        """Test hybrid search functionality."""
-        try:
-            results = self.codesleuth.hybrid_search(
-                "user authentication and password hashing", top_k=5
-            )
-
-            self.assertGreater(
-                len(results), 0, "Should find authentication-related code"
-            )
-
-            # Check that we got both semantic and lexical results
-            sources = {result["source"] for result in results}
-            self.assertGreater(
-                len(sources), 1, "Should have both semantic and lexical results"
-            )
-        except Exception as e:
-            logger.error(f"Error in test_hybrid_search: {e}", exc_info=True)
-            raise
-
     def test_search_function_definitions(self):
         """Test searching for function definitions."""
         try:

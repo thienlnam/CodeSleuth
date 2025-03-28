@@ -170,110 +170,59 @@ class TestCodeSleuthAPI(unittest.TestCase):
                 "source": "file_search",
             }
         ]
+
+        # Configure mock
         self.mock_lexical_search.search_file.return_value = file_results
 
-        # Perform the search
+        # Perform the file search
         results = self.api.search_file("*.py")
 
-        # Check that the file search was called with the right parameters
+        # Check that the search method was called with the right parameters
         self.mock_lexical_search.search_file.assert_called_once_with("*.py")
 
-        # Verify the results match the mock results
-        self.assertEqual(results, file_results)
-
-    def test_hybrid_search(self):
-        """Test hybrid search through the API."""
-        # Mock search results
-        semantic_results = [
-            {
-                "file_path": "/test/repo/file1.py",
-                "start_line": 10,
-                "end_line": 20,
-                "symbol_name": "test_function",
-                "code": "def test_function():\n    return 'test'",
-                "similarity": 0.9,
-                "source": "semantic",
-            }
-        ]
-
-        lexical_results = [
-            {
-                "file_path": "/test/repo/file2.py",  # Different file
-                "start_line": 15,
-                "end_line": 25,
-                "symbol_name": None,
-                "code": "class TestClass:\n    pass",
-                "match_line": 15,
-                "matched_text": "TestClass",
-                "similarity": 1.0,
-                "source": "lexical",
-            }
-        ]
-
-        # Configure mocks
-        self.mock_semantic_search.search.return_value = semantic_results
-        self.mock_lexical_search.search.return_value = lexical_results
-
-        # Perform the hybrid search
-        results = self.api.hybrid_search("test", top_k=5, max_lexical=10)
-
-        # Check that both search methods were called with the right parameters
-        self.mock_semantic_search.search.assert_called_once_with("test", top_k=5)
-        self.mock_lexical_search.search.assert_called_once_with(
-            "test",
-            max_results=10,
-            case_sensitive=False,
-            include_pattern=None,
-            exclude_pattern=None,
-        )
-
-        # Verify the results - should contain both semantic and lexical results
-        self.assertEqual(len(results), 2)
-
-        # Results should be sorted by similarity (highest first)
-        self.assertEqual(results[0]["source"], "lexical")  # 1.0 similarity
-        self.assertEqual(results[1]["source"], "semantic")  # 0.9 similarity
-
-    def test_hybrid_search_with_overlap(self):
-        """Test hybrid search with overlapping results."""
-        # Mock search results with same file/line range
-        semantic_results = [
-            {
-                "file_path": "/test/repo/file1.py",
-                "start_line": 10,
-                "end_line": 20,
-                "symbol_name": "test_function",
-                "code": "def test_function():\n    return 'test'",
-                "similarity": 0.9,
-                "source": "semantic",
-            }
-        ]
-
-        lexical_results = [
-            {
-                "file_path": "/test/repo/file1.py",  # Same file and range
-                "start_line": 10,
-                "end_line": 20,
-                "symbol_name": None,
-                "code": "def test_function():\n    return 'test'",
-                "match_line": 10,
-                "matched_text": "test_function",
-                "similarity": 1.0,
-                "source": "lexical",
-            }
-        ]
-
-        # Configure mocks
-        self.mock_semantic_search.search.return_value = semantic_results
-        self.mock_lexical_search.search.return_value = lexical_results
-
-        # Perform the hybrid search
-        results = self.api.hybrid_search("test", top_k=5)
-
-        # Verify the results - should only contain one result
-        # (duplicate was filtered out)
+        # Verify the results
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["source"], "semantic")
+        self.assertEqual(results[0]["file_path"], "/test/repo/file1.py")
+        self.assertEqual(results[0]["source"], "file_search")
+
+    def test_view_file(self):
+        """Test viewing file contents through the API."""
+        # Test viewing the whole file (default behavior)
+        mock_isabs.return_value = False
+        mock_join.return_value = "/test/repo/file.py"
+
+        result = self.api.view_file("file.py")
+        mock_open.assert_called_once_with("/test/repo/file.py", "r", encoding="utf-8")
+        self.assertEqual(result, "line1\nline2\nline3\nline4\nline5\n")
+
+        # Reset mocks
+        mock_open.reset_mock()
+        mock_isabs.reset_mock()
+        mock_join.reset_mock()
+
+        # Test viewing specific line range
+        mock_isabs.return_value = False
+        mock_join.return_value = "/test/repo/file.py"
+
+        result = self.api.view_file("file.py", start_line=2, end_line=4)
+        mock_open.assert_called_once_with("/test/repo/file.py", "r", encoding="utf-8")
+        self.assertEqual(
+            result, "line1\nline2\nline3\nline4\nline5\n"
+        )  # We'll get all lines due to context
+
+        # Reset mocks
+        mock_open.reset_mock()
+        mock_isabs.reset_mock()
+        mock_join.reset_mock()
+
+        # Test with absolute path
+        mock_isabs.return_value = True  # Set this BEFORE calling view_file
+
+        result = self.api.view_file("/absolute/path/file.py")
+        mock_open.assert_called_once_with(
+            "/absolute/path/file.py", "r", encoding="utf-8"
+        )
+        mock_join.assert_not_called()  # Should not join paths for absolute paths
 
     @patch("codesleuth.api.CodeParser")
     @patch("codesleuth.api.index_repository")

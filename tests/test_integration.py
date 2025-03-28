@@ -263,12 +263,6 @@ private:
         self.assertEqual(len(file_results), 1, "Should find one Python file")
         self.assertTrue(file_results[0]["file_path"].endswith("example.py"))
 
-        # Test hybrid search
-        hybrid_results = self.codesleuth.hybrid_search("search", top_k=5)
-        self.assertGreater(
-            len(hybrid_results), 0, "Should find hybrid results for 'search'"
-        )
-
     def test_update_index(self):
         """Test updating the index when files change."""
         # Index the repository

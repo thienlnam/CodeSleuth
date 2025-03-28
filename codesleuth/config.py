@@ -112,10 +112,6 @@ class SearchConfig(BaseModel):
         default=0.5,
         description="Minimum similarity score for results (0-1)",
     )
-    hybrid_search_weight: float = Field(
-        default=0.7,
-        description="Weight for semantic results in hybrid search (0-1)",
-    )
     max_grep_results: int = Field(
         default=50,
         description="Maximum number of results to return from grep search",
