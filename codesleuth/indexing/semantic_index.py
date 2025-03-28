@@ -57,6 +57,7 @@ class CodeEmbedder:
         model_hf_name = MODEL_MAPPING.get(model_name, model_name)
         logger.info(f"Loading model: {model_hf_name}")
 
+        # Load the model and tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_hf_name)
         self.model = AutoModel.from_pretrained(model_hf_name).to(self.device)
 
@@ -72,6 +73,9 @@ class CodeEmbedder:
 
         Returns:
             Embedding vector
+
+        Raises:
+            RuntimeError: If embedding fails
         """
         # Tokenize the code
         inputs = self.tokenizer(
@@ -99,6 +103,9 @@ class CodeEmbedder:
 
         Returns:
             Array of embedding vectors
+
+        Raises:
+            RuntimeError: If batch embedding fails
         """
         all_embeddings = []
 
@@ -136,12 +143,21 @@ class SemanticIndex:
         """
         self.config = config
         self.index_path = config.index_path
+        self.embedding_available = True
 
         # Initialize the embedder
-        self.embedder = CodeEmbedder(
-            model_name=config.model_name,
-            use_gpu=config.use_gpu,
-        )
+        try:
+            self.embedder = CodeEmbedder(
+                model_name=config.model_name,
+                use_gpu=config.use_gpu,
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding model: {e}")
+            logger.warning(
+                "Semantic search will not be available - only lexical search will work"
+            )
+            self.embedding_available = False
+            self.embedder = None
 
         # Initialize FAISS index
         self.index = None
@@ -151,9 +167,22 @@ class SemanticIndex:
 
         # Load index if it exists
         if self._index_exists():
-            self._load_index()
+            try:
+                self._load_index()
+            except Exception as e:
+                logger.error(f"Failed to load existing index: {e}")
+                self._create_index()
         else:
             self._create_index()
+
+    def is_semantic_search_available(self) -> bool:
+        """
+        Check if semantic search is available.
+
+        Returns:
+            True if semantic search is available, False otherwise
+        """
+        return self.embedding_available and self.embedder is not None
 
     def _index_exists(self) -> bool:
         """
@@ -255,36 +284,46 @@ class SemanticIndex:
         if not chunks:
             return
 
-        # Extract code snippets
-        codes = [chunk.code for chunk in chunks]
+        if not self.is_semantic_search_available():
+            logger.warning("Embedding model not available - skipping semantic indexing")
+            return
 
-        # Compute embeddings in batches
-        logger.info(f"Computing embeddings for {len(codes)} chunks")
-        embeddings = self.embedder.embed_batch(codes, batch_size=self.config.batch_size)
+        try:
+            # Extract code snippets
+            codes = [chunk.code for chunk in chunks]
 
-        # Assign IDs, preferring reusable IDs when available
-        ids = []
-        id_to_chunk = {}
+            # Compute embeddings in batches
+            logger.info(f"Computing embeddings for {len(codes)} chunks")
+            embeddings = self.embedder.embed_batch(
+                codes, batch_size=self.config.batch_size
+            )
 
-        for i, chunk in enumerate(chunks):
-            chunk_id = self._get_next_id()
-            ids.append(chunk_id)
-            id_to_chunk[chunk_id] = chunk
+            # Assign IDs, preferring reusable IDs when available
+            ids = []
+            id_to_chunk = {}
 
-            # Only increment next_id if we used it
-            if chunk_id == self.next_id:
-                self.next_id += 1
+            for i, chunk in enumerate(chunks):
+                chunk_id = self._get_next_id()
+                ids.append(chunk_id)
+                id_to_chunk[chunk_id] = chunk
 
-        # Add to index
-        self.index.add_with_ids(embeddings, np.array(ids))
+                # Only increment next_id if we used it
+                if chunk_id == self.next_id:
+                    self.next_id += 1
 
-        # Update metadata
-        self.metadata.update(id_to_chunk)
+            # Add to index
+            self.index.add_with_ids(embeddings, np.array(ids))
 
-        # Save index
-        self._save_index()
+            # Update metadata
+            self.metadata.update(id_to_chunk)
 
-        logger.info(f"Added {len(chunks)} chunks to index")
+            # Save index
+            self._save_index()
+
+            logger.info(f"Added {len(chunks)} chunks to index")
+        except Exception as e:
+            logger.error(f"Failed to add chunks to index: {e}")
+            logger.warning("Semantic search functionality may be limited")
 
     def remove_file(self, file_path: Union[str, Path]):
         """
@@ -397,34 +436,47 @@ class SemanticIndex:
 
         Returns:
             List of (chunk, similarity) tuples
+
+        Raises:
+            RuntimeError: If semantic search is not available
         """
+        if not self.is_semantic_search_available():
+            logger.warning(
+                "Semantic search is not available due to missing embedding model"
+            )
+            return []
+
         if self.index is None or self.index.ntotal == 0:
             logger.warning("Empty index, no results")
             return []
 
-        # Embed the query
-        query_embedding = self.embedder.embed(query)
-        query_embedding = query_embedding.reshape(1, -1)
+        try:
+            # Embed the query
+            query_embedding = self.embedder.embed(query)
+            query_embedding = query_embedding.reshape(1, -1)
 
-        # Search the index
-        distances, indices = self.index.search(query_embedding, top_k)
+            # Search the index
+            distances, indices = self.index.search(query_embedding, top_k)
 
-        # Convert to results
-        results = []
-        for i, idx in enumerate(indices[0]):
-            if (
-                idx == -1
-            ):  # FAISS returns -1 for padding when there are not enough results
-                continue
+            # Convert to results
+            results = []
+            for i, idx in enumerate(indices[0]):
+                if (
+                    idx == -1
+                ):  # FAISS returns -1 for padding when there are not enough results
+                    continue
 
-            chunk = self.metadata.get(int(idx))
-            if chunk:
-                similarity = 1.0 / (
-                    1.0 + distances[0][i]
-                )  # Convert distance to similarity score
-                results.append((chunk, similarity))
+                chunk = self.metadata.get(int(idx))
+                if chunk:
+                    similarity = 1.0 / (
+                        1.0 + distances[0][i]
+                    )  # Convert distance to similarity score
+                    results.append((chunk, similarity))
 
-        return results
+            return results
+        except Exception as e:
+            logger.error(f"Error during semantic search: {e}")
+            return []
 
 
 def create_semantic_index(config: CodeSleuthConfig) -> SemanticIndex:

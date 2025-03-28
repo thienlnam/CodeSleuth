@@ -26,6 +26,15 @@ class SemanticSearch:
         """
         self.semantic_index = semantic_index
 
+    def is_available(self) -> bool:
+        """
+        Check if semantic search is available.
+
+        Returns:
+            True if semantic search is available, False otherwise
+        """
+        return self.semantic_index.is_semantic_search_available()
+
     def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """
         Search for code snippets semantically similar to the query.
@@ -35,9 +44,17 @@ class SemanticSearch:
             top_k: Number of results to return
 
         Returns:
-            List of dictionaries with code snippets and metadata
+            List of dictionaries with code snippets and metadata.
+            Returns empty list if semantic search is not available.
         """
         logger.debug(f"Semantic search for: {query} (top_k={top_k})")
+
+        # Check if semantic search is available
+        if not self.is_available():
+            logger.warning(
+                "Semantic search was requested but is not available - returning empty results"
+            )
+            return []
 
         # Get search results from the index
         results = self.semantic_index.search(query, top_k=top_k)

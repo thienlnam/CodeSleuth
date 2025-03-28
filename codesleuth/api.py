@@ -34,6 +34,15 @@ class CodeSleuth:
         self.semantic_search = create_semantic_search(config)
         self.lexical_search = create_lexical_search(config)
 
+    def is_semantic_search_available(self) -> bool:
+        """
+        Check if semantic search is available.
+
+        Returns:
+            True if semantic search is available, False otherwise
+        """
+        return self.semantic_search.is_available()
+
     def index_repository(self):
         """Index the repository."""
         logger.info(f"Indexing repository: {self.config.repo_path}")
@@ -50,8 +59,15 @@ class CodeSleuth:
             top_k: Number of results to return
 
         Returns:
-            List of search results
+            List of search results. If semantic search is not available,
+            falls back to lexical search with a warning.
         """
+        if not self.is_semantic_search_available():
+            logger.warning(
+                "Semantic search unavailable, falling back to lexical search"
+            )
+            return self.search_lexically(query, max_results=top_k)
+
         return self.semantic_search.search(query, top_k=top_k)
 
     def search_lexically(
@@ -126,11 +142,21 @@ class CodeSleuth:
         Returns:
             List of search results
         """
-        # Get semantic results
-        semantic_results = self.search_semantically(query, top_k=top_k)
+        # Get semantic results if available
+        if self.is_semantic_search_available():
+            semantic_results = self.search_semantically(query, top_k=top_k)
+        else:
+            logger.warning(
+                "Semantic search unavailable for hybrid search, using only lexical results"
+            )
+            semantic_results = []
 
         # Get lexical results for the same query
         lexical_results = self.search_lexically(query, max_results=max_lexical)
+
+        # If no semantic results, just return lexical results up to top_k
+        if not semantic_results:
+            return lexical_results[:top_k]
 
         # Combine results, prioritizing semantic results but ensuring some lexical ones
         # This is a simple approach - could be made more sophisticated
