@@ -282,23 +282,22 @@ class SemanticIndex:
         # Get embedding dimension from model registry
         embedding_dim = MODEL_REGISTRY[self.config.model_name].embedding_dim
 
-        # Detect Python 3.13 on M1/M2 Macs for compatibility issues
-        is_python_3_13 = sys.version_info.major == 3 and sys.version_info.minor == 13
+        # Detect M1/M2 Macs for compatibility issues
         is_apple_silicon = platform.processor() == "arm"
-        problematic_environment = is_python_3_13 and is_apple_silicon
 
         logger.debug(f"Creating index with embedding_dim={embedding_dim}")
         logger.debug(
             f"Python version: {sys.version_info.major}.{sys.version_info.minor}"
         )
-        logger.debug(f"Platform processor: {platform.processor()}")
-        logger.debug(f"Problematic environment: {problematic_environment}")
+        logger.debug(
+            f"Platform processor: {platform.processor()}, Apple Silicone: {is_apple_silicon}"
+        )
 
         try:
-            if problematic_environment:
-                # Known issue with HNSW on Python 3.13 + Apple Silicon
+            if is_apple_silicon:
+                # Known issue with HNSW on Apple Silicon
                 logger.info(
-                    "Detected Python 3.13 on M1/M2 Mac, using FlatL2 index for compatibility"
+                    "Detected Apple Silicone, using FlatL2 index for compatibility"
                 )
                 flat_index = faiss.IndexFlatL2(embedding_dim)
                 logger.debug(f"Created FlatL2 index: {flat_index}")
@@ -336,7 +335,7 @@ class SemanticIndex:
             logger.info("Created FlatL2 index as fallback")
 
         # Use a more robust search method for problematic environments
-        self.use_direct_search = not problematic_environment
+        self.use_direct_search = not is_apple_silicon
 
     def _save_index(self):
         """Save the index and metadata to disk."""
