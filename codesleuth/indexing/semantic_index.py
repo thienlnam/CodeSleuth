@@ -32,8 +32,8 @@ MODEL_MAPPING = {
 
 # MLX model registry names
 MLX_MODEL_MAPPING = {
-    EmbeddingModel.CODEBERT: "codebert",
-    EmbeddingModel.E5_SMALL: "e5-small",
+    EmbeddingModel.CODEBERT: "bge-small",  # Using BGE-small as a replacement for CodeBERT
+    EmbeddingModel.E5_SMALL: "bge-small",  # Using BGE-small as a replacement for E5-small
 }
 
 # Import MLX Embedding Models
@@ -253,7 +253,9 @@ class SemanticIndex:
         self.index_path.mkdir(parents=True, exist_ok=True)
 
         # Get embedding dimension based on model
-        if self.config.model_name == EmbeddingModel.E5_SMALL:
+        if self.embedder.use_mlx:
+            embedding_dim = 384  # BGE-small embedding dimension
+        elif self.config.model_name == EmbeddingModel.E5_SMALL:
             embedding_dim = 384  # E5-small-v2 embedding dimension
         else:
             embedding_dim = 768  # CodeBERT embedding dimension
@@ -263,6 +265,13 @@ class SemanticIndex:
         is_apple_silicon = platform.processor() == "arm"
         problematic_environment = is_python_3_13 and is_apple_silicon
 
+        logger.debug(f"Creating index with embedding_dim={embedding_dim}")
+        logger.debug(
+            f"Python version: {sys.version_info.major}.{sys.version_info.minor}"
+        )
+        logger.debug(f"Platform processor: {platform.processor()}")
+        logger.debug(f"Problematic environment: {problematic_environment}")
+
         try:
             if problematic_environment:
                 # Known issue with HNSW on Python 3.13 + Apple Silicon
@@ -270,7 +279,9 @@ class SemanticIndex:
                     "Detected Python 3.13 on M1/M2 Mac, using FlatL2 index for compatibility"
                 )
                 flat_index = faiss.IndexFlatL2(embedding_dim)
+                logger.debug(f"Created FlatL2 index: {flat_index}")
                 self.index = faiss.IndexIDMap(flat_index)
+                logger.debug(f"Wrapped with IDMap: {self.index}")
             else:
                 # Try to create HNSW index for better performance
                 logger.info(
@@ -289,8 +300,14 @@ class SemanticIndex:
                 # Wrap with IDMap to support add_with_ids
                 self.index = faiss.IndexIDMap(hnsw_index)
 
+            # Verify index is initialized correctly
+            logger.debug(f"Index type: {type(self.index)}")
+            logger.debug(f"Index dimension: {self.index.d}")
+            logger.debug(f"Index is trained: {self.index.is_trained}")
+            logger.debug(f"Index total vectors: {self.index.ntotal}")
+
         except Exception as e:
-            logger.error(f"Error creating HNSW index: {e}, using FlatL2 as fallback")
+            logger.error(f"Error creating HNSW index: {e}", exc_info=True)
             # Fallback to FlatL2 if creation fails
             flat_index = faiss.IndexFlatL2(embedding_dim)
             self.index = faiss.IndexIDMap(flat_index)
@@ -416,6 +433,16 @@ class SemanticIndex:
                 codes, batch_size=self.config.batch_size
             )
 
+            # Ensure embeddings are in the correct format for FAISS
+            if self.embedder.use_mlx:
+                # MLX embeddings are already in the correct format
+                embeddings = np.array(embeddings, dtype=np.float32)
+                logger.debug(f"MLX embeddings shape: {embeddings.shape}")
+            else:
+                # PyTorch embeddings need to be converted to float32
+                embeddings = embeddings.astype(np.float32)
+                logger.debug(f"PyTorch embeddings shape: {embeddings.shape}")
+
             # Assign IDs, preferring reusable IDs when available
             ids = []
             id_to_chunk = {}
@@ -435,7 +462,29 @@ class SemanticIndex:
                     self.next_id += 1
 
             # Add to index
-            self.index.add_with_ids(embeddings, np.array(ids))
+            logger.debug(f"Adding {len(embeddings)} vectors to index")
+            try:
+                # Debug info about embeddings
+                logger.debug(f"Embeddings dtype: {embeddings.dtype}")
+                logger.debug(f"Embeddings shape: {embeddings.shape}")
+                logger.debug(f"Embeddings memory layout: {embeddings.flags}")
+                logger.debug(f"Any NaN in embeddings: {np.isnan(embeddings).any()}")
+                logger.debug(f"Any Inf in embeddings: {np.isinf(embeddings).any()}")
+
+                # Debug info about IDs
+                ids_array = np.array(ids)
+                logger.debug(f"IDs dtype: {ids_array.dtype}")
+                logger.debug(f"IDs shape: {ids_array.shape}")
+                logger.debug(f"IDs: {ids_array}")
+
+                # Ensure embeddings are contiguous and in the right format
+                embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+                ids_array = np.ascontiguousarray(ids_array, dtype=np.int64)
+
+                self.index.add_with_ids(embeddings, ids_array)
+            except Exception as e:
+                logger.error(f"Error adding vectors to index: {e}", exc_info=True)
+                raise
 
             # Update metadata
             for chunk_id, chunk in id_to_chunk.items():
@@ -450,7 +499,7 @@ class SemanticIndex:
 
             logger.info(f"Added {len(chunks)} chunks to index")
         except Exception as e:
-            logger.error(f"Failed to add chunks to index: {e}")
+            logger.error(f"Failed to add chunks to index: {e}", exc_info=True)
             logger.warning("Semantic search functionality may be limited")
 
     def remove_file(self, file_path: Union[str, Path]):

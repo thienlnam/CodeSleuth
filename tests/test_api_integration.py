@@ -28,6 +28,8 @@ class TestCodeSleuthIntegration(unittest.TestCase):
 
             # Create a temporary directory for the index
             cls.index_path = cls.sample_repo_path / "index"
+            if cls.index_path.exists():
+                shutil.rmtree(cls.index_path)
             cls.index_path.mkdir(exist_ok=True)
             logger.debug(f"Index path: {cls.index_path}")
 
@@ -39,7 +41,7 @@ class TestCodeSleuthIntegration(unittest.TestCase):
                 respect_gitignore=True,
             )
 
-            # Try to use a simpler model first
+            # Configure semantic search
             index_config = IndexConfig(
                 model_name=EmbeddingModel.CODEBERT,
                 index_path=str(cls.index_path),
@@ -61,13 +63,21 @@ class TestCodeSleuthIntegration(unittest.TestCase):
             cls.codesleuth = CodeSleuth(cls.config)
             logger.debug("CodeSleuth initialized successfully")
 
-            # Check if semantic search is available
-            if cls.codesleuth.is_semantic_search_available():
-                logger.debug("Semantic search is available, indexing repository...")
-                cls.codesleuth.index_repository()
-                logger.debug("Repository indexed successfully")
-            else:
-                logger.warning("Semantic search is not available, skipping indexing")
+            # Force index creation
+            logger.debug("Creating semantic search index...")
+            cls.codesleuth.index_repository()
+            logger.debug("Repository indexed successfully")
+
+            # Verify semantic search is available and index has content
+            if not cls.codesleuth.is_semantic_search_available():
+                raise RuntimeError("Semantic search is not available after indexing")
+
+            # Check if index has content
+            index = cls.codesleuth.semantic_search.semantic_index
+            if index.index is None or index.index.ntotal == 0:
+                raise RuntimeError("Semantic index is empty after indexing")
+
+            logger.debug(f"Index contains {index.index.ntotal} vectors")
 
         except Exception as e:
             logger.error(f"Error in setUpClass: {e}", exc_info=True)

@@ -177,9 +177,22 @@ class CodeSleuth:
         if not semantic_results:
             return lexical_results[:top_k]
 
-        # Combine results, prioritizing semantic results but ensuring some lexical ones
-        # This is a simple approach - could be made more sophisticated
-        combined = semantic_results.copy()
+        # Reserve spots for both types of results
+        # At least 1/3 of spots for each type if available
+        min_spots = max(1, top_k // 3)
+        semantic_spots = min(len(semantic_results), top_k - min_spots)
+        lexical_spots = min(len(lexical_results), top_k - semantic_spots)
+
+        # Ensure we have at least one spot for each type if results are available
+        if semantic_spots == 0 and semantic_results:
+            semantic_spots = 1
+            lexical_spots = min(lexical_spots, top_k - 1)
+        if lexical_spots == 0 and lexical_results:
+            lexical_spots = 1
+            semantic_spots = min(semantic_spots, top_k - 1)
+
+        # Take the best results from each source
+        combined = semantic_results[:semantic_spots]
 
         # Track seen file paths and line ranges to avoid duplicates
         seen = set()
@@ -191,7 +204,8 @@ class CodeSleuth:
             )
             seen.add(key)
 
-        # Add lexical results that don't overlap with semantic results
+        # Add non-overlapping lexical results
+        added_lexical = 0
         for result in lexical_results:
             key = (
                 result["file_path"],
@@ -201,15 +215,14 @@ class CodeSleuth:
             if key not in seen:
                 combined.append(result)
                 seen.add(key)
-                # Stop if we've reached the desired number of results
-                if len(combined) >= top_k:
+                added_lexical += 1
+                if added_lexical >= lexical_spots:
                     break
 
         # Sort by similarity score
         combined.sort(key=lambda x: x["similarity"], reverse=True)
 
-        # Limit to top_k
-        return combined[:top_k]
+        return combined
 
     def view_file(
         self,
