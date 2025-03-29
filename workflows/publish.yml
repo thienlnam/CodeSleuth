@@ -1,0 +1,60 @@
+name: Publish to PyPI
+
+on:
+    release:
+        types: [created]
+
+    # Allow manual triggering
+    workflow_dispatch:
+        inputs:
+            target:
+                description: 'Target PyPI repository'
+                required: true
+                default: 'test'
+                type: choice
+                options:
+                    - test
+                    - prod
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        environment: pypi
+        permissions:
+            id-token: write # Required for trusted publishing
+            contents: read # Required for checkout
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.13'
+
+            - name: Install Poetry
+              run: |
+                  curl -sSL https://install.python-poetry.org | python3 -
+                  echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+            - name: Configure Poetry
+              run: |
+                  poetry config virtualenvs.create false
+
+            - name: Install dependencies
+              run: |
+                  poetry install
+
+            - name: Build package
+              run: |
+                  poetry build
+
+            - name: Publish to Test PyPI
+              if: inputs.target == 'test'
+              uses: pypa/gh-action-pypi-publish@release/v1
+              with:
+                  repository-url: https://test.pypi.org/legacy/
+
+            - name: Publish to PyPI
+              if: inputs.target == 'prod'
+              uses: pypa/gh-action-pypi-publish@release/v1

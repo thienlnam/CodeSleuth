@@ -20,7 +20,7 @@ CodeSleuth is a local-first code search and retrieval tool optimized for LLM int
 
 ### ⚡ Performance Optimizations
 
--   **MLX Integration**: Native support for Apple Silicon
+-   **MLX Integration**: Native support for Apple Silicon (M1/M2/M3)
 -   **Smart Index Selection**:
     -   FAISS with HNSW for x86/AMD architectures
     -   Optimized FAISS for ARM processors
@@ -58,7 +58,7 @@ pip install codesleuth
 
 ```python
 from codesleuth import CodeSleuth
-from codesleuth.config import CodeSleuthConfig
+from codesleuth.config import CodeSleuthConfig, EmbeddingModel
 
 # Initialize CodeSleuth with your repository path
 config = CodeSleuthConfig(repo_path="/path/to/your/repo")
@@ -67,12 +67,20 @@ codesleuth = CodeSleuth(config)
 # Index your repository (uses MLX on Apple Silicon, FAISS otherwise)
 codesleuth.index_repository()
 
-# Search for code semantically (perfect for LLM integration)
-results = codesleuth.search_semantically(
-    "authentication service implementation",
-    top_k=5,
-    similarity_threshold=0.7
-)
+# Check if semantic search is available
+if codesleuth.is_semantic_search_available():
+    # Search for code semantically (perfect for LLM integration)
+    results = codesleuth.semantic_search.search(
+        "authentication service implementation",
+        top_k=5,
+        similarity_threshold=0.7
+    )
+else:
+    # Fall back to lexical search if semantic search isn't available
+    results = codesleuth.lexical_search.search(
+        "authentication service",
+        max_results=5
+    )
 
 # Use with your LLM
 for result in results:
@@ -85,7 +93,7 @@ for result in results:
 CodeSleuth automatically optimizes for your hardware:
 
 ```python
-from codesleuth.config import CodeSleuthConfig, ParserConfig, IndexConfig
+from codesleuth.config import CodeSleuthConfig, ParserConfig, IndexConfig, EmbeddingModel
 
 config = CodeSleuthConfig(
     repo_path="/path/to/repo",
@@ -94,10 +102,20 @@ config = CodeSleuthConfig(
         chunk_overlap=20,
         ignore_patterns=["node_modules/*", "dist/*"]
     ),
-    # Index configuration is automatically optimized for your hardware
     index=IndexConfig(
-        embedding_model="bge-m3",  # Uses MLX on Apple Silicon
-        dimension=1024
+        model_name=EmbeddingModel.BGE_M3,  # Uses MLX on Apple Silicon
+        dimension=1024,
+        use_mlx=True,  # Automatically use MLX on Apple Silicon
+        use_gpu=False,  # Set to True to use GPU if available
+        batch_size=32,  # Adjust for your memory constraints
+        hnsw_m=16,  # Number of connections per node in HNSW index
+        hnsw_ef_construction=100,  # Search depth during construction
+        hnsw_ef_search=64  # Search depth during search
+    ),
+    search=SearchConfig(
+        max_results=10,
+        min_similarity=0.5,
+        max_grep_results=50
     )
 )
 ```
@@ -114,11 +132,19 @@ from your_llm import LLM
 codesleuth = CodeSleuth(config)
 llm = LLM()
 
-# Search for relevant code
-results = codesleuth.search_semantically(
-    "implement user authentication with JWT",
-    top_k=3
-)
+# Check semantic search availability
+if codesleuth.is_semantic_search_available():
+    # Search for relevant code
+    results = codesleuth.semantic_search.search(
+        "implement user authentication with JWT",
+        top_k=3
+    )
+else:
+    # Fall back to lexical search
+    results = codesleuth.lexical_search.search(
+        "user authentication JWT",
+        max_results=3
+    )
 
 # Use the results with your LLM
 context = "\n".join(result["code"] for result in results)
@@ -136,10 +162,18 @@ config = CodeSleuthConfig(
         chunk_overlap=30,  # More overlap for better context
     ),
     index=IndexConfig(
-        embedding_model="bge-m3",
+        model_name=EmbeddingModel.BGE_M3,
         dimension=1024,
-        hnsw_ef_construction=200,  # Tune HNSW index quality
-        hnsw_ef_search=50  # Tune search speed vs accuracy
+        use_mlx=True,  # Use MLX on Apple Silicon
+        batch_size=64,  # Larger batch size for faster processing
+        hnsw_m=32,  # More connections for better recall
+        hnsw_ef_construction=200,  # Higher quality index
+        hnsw_ef_search=50  # Balance between speed and accuracy
+    ),
+    search=SearchConfig(
+        max_results=20,  # More results for better coverage
+        min_similarity=0.6,  # Stricter similarity threshold
+        max_grep_results=100  # More grep results for better context
     )
 )
 ```

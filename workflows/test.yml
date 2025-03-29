@@ -1,0 +1,83 @@
+name: Run Tests
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ['3.13']
+
+        services:
+            # Setup Neo4j container for integration tests
+            neo4j:
+                image: neo4j:5.15.0
+                env:
+                    NEO4J_AUTH: neo4j/password
+                ports:
+                    - 7687:7687
+                options: >-
+                    --health-cmd "wget -q -O - http://localhost:7474/browser/ || exit 1"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v4
+              with:
+                  python-version: ${{ matrix.python-version }}
+
+            - name: Install Poetry
+              run: |
+                  curl -sSL https://install.python-poetry.org | python3 -
+                  echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+            - name: Configure Poetry
+              run: |
+                  poetry config virtualenvs.create false
+
+            - name: Install dependencies
+              run: |
+                  poetry install
+
+            - name: Create test environment file
+              run: |
+                  cat > .env <<EOF
+                  NEO4J_URI=bolt://localhost:7687
+                  NEO4J_USERNAME=neo4j
+                  NEO4J_PASSWORD=password
+                  LLM_PROVIDER=openai
+                  LLM_MODEL=gpt-4o
+                  LLM_TEMPERATURE=0.7
+                  LLM_MAX_TOKENS=1000
+                  MIN_CONFIDENCE_THRESHOLD=0.3
+                  OPINION_RESISTANCE_FACTOR=0.8
+                  CONFIDENCE_DECAY_RATE=0.05
+                  DEFAULT_SOURCE_TRUST=0.5
+                  CONTRADICTION_THRESHOLD=0.7
+                  LOG_LEVEL=INFO
+                  # Using a mock API key for tests
+                  OPENAI_API_KEY=sk-mock-1234567890abcdef1234567890abcdef
+                  EOF
+
+            - name: Run tests with coverage
+              run: |
+                  poetry run pytest --cov=tests/ --cov-report=xml
+              env:
+                  OPENAI_API_KEY: sk-mock-1234567890abcdef1234567890abcdef
+
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@v3
+              with:
+                  file: ./coverage.xml
+                  fail_ci_if_error: false
