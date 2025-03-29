@@ -47,6 +47,7 @@ class TestCodeSleuthIntegration(unittest.TestCase):
                 index_path=str(cls.index_path),
                 batch_size=8,
                 use_gpu=False,
+                use_mlx=False,
                 hnsw_m=16,
                 hnsw_ef_construction=200,
                 hnsw_ef_search=50,

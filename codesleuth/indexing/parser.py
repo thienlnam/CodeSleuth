@@ -153,14 +153,32 @@ class CodeParser:
             file_path: Path to the file
 
         Returns:
-            List of CodeChunk objects
+            List of code chunks
         """
         str_path = str(file_path)
-        language = self.get_language_for_file(str_path)
 
+        # Get the language from the file extension
+        language = self.get_language_for_file(str_path)
         if language is None:
-            logger.warning(f"Unknown language for file: {str_path}")
-            return self._fallback_parse_file(str_path)
+            # For text files, use a generic text language identifier
+            if str_path.endswith(
+                (
+                    ".txt",
+                    ".md",
+                    ".json",
+                    ".yaml",
+                    ".yml",
+                    ".toml",
+                    ".ini",
+                    ".cfg",
+                    ".conf",
+                )
+            ):
+                language = "text"
+                logger.debug(f"Treating {str_path} as text file")
+            else:
+                logger.warning(f"Unknown language for file: {str_path}")
+                return []
 
         parser = self.tree_sitter_manager.get_parser(language)
         if parser is None:
@@ -174,6 +192,10 @@ class CodeParser:
             with open(str_path, "r", encoding="utf-8") as f:
                 code = f.read()
                 line_count = code.count("\n") + 1
+
+            # For text files, always use line-based chunking
+            if language == "text":
+                return self._fallback_parse_file(str_path, language)
 
             # Parse the file with Tree-sitter
             # In an actual implementation, this would parse the tree and extract functions

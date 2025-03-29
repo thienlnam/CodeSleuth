@@ -59,8 +59,17 @@ class ParserConfig(BaseModel):
             ".java": "java",
             ".go": "go",
             ".rs": "rust",
+            ".txt": "text",
+            ".md": "text",
+            ".json": "text",
+            ".yaml": "text",
+            ".yml": "text",
+            ".toml": "text",
+            ".ini": "text",
+            ".cfg": "text",
+            ".conf": "text",
         },
-        description="Mapping of file extensions to languages",
+        description="Mapping of file extensions to language names",
     )
 
 
