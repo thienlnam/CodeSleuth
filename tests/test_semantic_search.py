@@ -55,7 +55,10 @@ class TestSemanticSearch(unittest.TestCase):
         results = self.search.search(query="test query", top_k=2)
 
         # Check that the index search was called with the right parameters
-        self.mock_index.search.assert_called_once_with("test query", top_k=2)
+        # The search method modifies the query and top_k for better results
+        self.mock_index.search.assert_called_once_with(
+            "Find code for test query.", top_k=4
+        )
 
         # Verify the results format
         self.assertEqual(len(results), 2)

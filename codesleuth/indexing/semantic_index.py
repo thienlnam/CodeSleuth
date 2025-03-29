@@ -184,14 +184,64 @@ class CodeEmbedder:
         Raises:
             RuntimeError: If batch embedding fails
         """
+        if not codes:
+            return np.array([])
+
         if self.use_mlx:
-            # MLX handles batching internally
-            return self.model.encode(codes)
+            # Process in batches for MLX to avoid memory issues
+            all_embeddings = []
+            for i in range(0, len(codes), batch_size):
+                batch = codes[i : min(i + batch_size, len(codes))]
+                try:
+                    # MLX handles tokenization and embedding
+                    batch_embeddings = self.model.encode(batch)
+
+                    # Convert to numpy array if needed
+                    if not isinstance(batch_embeddings, np.ndarray):
+                        batch_embeddings = np.array(batch_embeddings)
+
+                    # Ensure correct shape
+                    if len(batch_embeddings.shape) == 1:
+                        batch_embeddings = batch_embeddings.reshape(1, -1)
+                    elif len(batch_embeddings.shape) > 2:
+                        # If we have more than 2 dimensions, take the first embedding
+                        batch_embeddings = batch_embeddings[:, 0, :]
+
+                    # Ensure float32 type and correct shape
+                    batch_embeddings = batch_embeddings.astype(np.float32)
+
+                    # Verify embedding dimension
+                    if batch_embeddings.shape[1] != self.model_info.embedding_dim:
+                        logger.error(
+                            f"Unexpected embedding dimension: {batch_embeddings.shape[1]}, expected {self.model_info.embedding_dim}"
+                        )
+                        continue
+
+                    all_embeddings.append(batch_embeddings)
+                    logger.debug(
+                        f"Successfully embedded batch {i//batch_size + 1}, shape: {batch_embeddings.shape}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error embedding batch {i//batch_size + 1}: {e}")
+                    continue
+
+            # Stack all batches
+            if all_embeddings:
+                try:
+                    stacked = np.vstack(all_embeddings)
+                    logger.debug(
+                        f"Successfully stacked all embeddings, final shape: {stacked.shape}"
+                    )
+                    return stacked
+                except Exception as e:
+                    logger.error(f"Error stacking embeddings: {e}")
+                    raise
+            return np.array([])
         else:
             all_embeddings = []
 
             for i in range(0, len(codes), batch_size):
-                batch = codes[i : i + batch_size]
+                batch = codes[i : min(i + batch_size, len(codes))]
 
                 # Tokenize the batch
                 inputs = self.tokenizer(
@@ -435,12 +485,13 @@ class SemanticIndex:
 
     def add_chunks(self, chunks: List[CodeChunk]):
         """
-        Add code chunks to the index.
+        Add chunks to the index.
 
         Args:
             chunks: List of code chunks to add
         """
         if not chunks:
+            logger.info("No chunks to add")
             return
 
         if not self.is_semantic_search_available():
@@ -450,12 +501,23 @@ class SemanticIndex:
         try:
             # Extract code snippets
             codes = [chunk.code for chunk in chunks]
+            logger.debug(f"Processing {len(codes)} code snippets")
 
             # Compute embeddings in batches
             logger.info(f"Computing embeddings for {len(codes)} chunks")
-            embeddings = self.embedder.embed_batch(
-                codes, batch_size=self.config.batch_size
-            )
+            try:
+                embeddings = self.embedder.embed_batch(
+                    codes, batch_size=self.config.batch_size
+                )
+                if embeddings is None or len(embeddings) == 0:
+                    logger.error("No embeddings were generated")
+                    return
+                logger.debug(
+                    f"Successfully computed embeddings: shape={embeddings.shape}"
+                )
+            except Exception as e:
+                logger.error(f"Error computing embeddings: {e}", exc_info=True)
+                return
 
             # Ensure embeddings are in the correct format for FAISS
             if self.embedder.use_mlx:
@@ -467,26 +529,36 @@ class SemanticIndex:
                 embeddings = embeddings.astype(np.float32)
                 logger.debug(f"PyTorch embeddings shape: {embeddings.shape}")
 
+            # Verify we have valid embeddings
+            if embeddings.shape[0] == 0:
+                logger.error("No valid embeddings to add to index")
+                return
+
             # Assign IDs, preferring reusable IDs when available
             ids = []
             id_to_chunk = {}
             id_to_embedding = {}
 
             for i, chunk in enumerate(chunks):
+                if i >= len(embeddings):
+                    logger.warning(f"Skipping chunk {i} - no embedding available")
+                    continue
+
                 chunk_id = self._get_next_id()
                 ids.append(chunk_id)
                 id_to_chunk[chunk_id] = chunk
-
-                # Store the embedding for the chunk
-                if i < len(embeddings):
-                    id_to_embedding[chunk_id] = embeddings[i]
+                id_to_embedding[chunk_id] = embeddings[i]
 
                 # Only increment next_id if we used it
                 if chunk_id == self.next_id:
                     self.next_id += 1
 
+            if not ids:
+                logger.error("No valid chunks to add to index")
+                return
+
             # Add to index
-            logger.debug(f"Adding {len(embeddings)} vectors to index")
+            logger.debug(f"Adding {len(ids)} vectors to index")
             try:
                 # Debug info about embeddings
                 logger.debug(f"Embeddings dtype: {embeddings.dtype}")
@@ -505,7 +577,19 @@ class SemanticIndex:
                 embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
                 ids_array = np.ascontiguousarray(ids_array, dtype=np.int64)
 
+                # Verify dimensions match
+                if len(ids_array) != len(embeddings):
+                    logger.error(
+                        f"Dimension mismatch: ids={len(ids_array)}, embeddings={len(embeddings)}"
+                    )
+                    raise ValueError(
+                        "Number of IDs does not match number of embeddings"
+                    )
+
                 self.index.add_with_ids(embeddings, ids_array)
+                logger.debug(
+                    f"Successfully added vectors to index, new total: {self.index.ntotal}"
+                )
             except Exception as e:
                 logger.error(f"Error adding vectors to index: {e}", exc_info=True)
                 raise
@@ -687,6 +771,9 @@ class SemanticIndex:
         try:
             # Encode the query
             query_embedding = self.embedder.embed(query)
+            logger.debug(
+                f"Query embedding shape: {query_embedding.shape if query_embedding is not None else 'None'}"
+            )
 
             if query_embedding is None:
                 logger.warning("Failed to encode query, no search results available")
@@ -700,6 +787,9 @@ class SemanticIndex:
                 # Clean any NaN or Inf values
                 if np.isnan(query_np).any() or np.isinf(query_np).any():
                     query_np = np.nan_to_num(query_np, nan=0.0, posinf=0.0, neginf=0.0)
+
+                # Normalize the query embedding
+                query_np = query_np / np.linalg.norm(query_np)
 
                 # Force contiguous memory layout in C order
                 query_np = np.ascontiguousarray(query_np, dtype=np.float32)
@@ -738,6 +828,7 @@ class SemanticIndex:
 
                     # Perform the search
                     distances, indices = self.index.search(final_query, k)
+                    logger.debug(f"Search results: {len(indices[0])} indices found")
                 except Exception as search_err:
                     logger.error(f"Search operation failed: {search_err}")
                     # If FAISS search fails, fallback to manual distance calculation
@@ -754,8 +845,12 @@ class SemanticIndex:
                     if entry:
                         chunk = entry.chunk if isinstance(entry, IndexEntry) else entry
                         # Convert distance to similarity score (higher is better)
-                        similarity = 1.0 / (1.0 + float(distances[0][i]))
+                        # Using cosine similarity since we normalized the query
+                        similarity = 1.0 - float(distances[0][i]) / 2.0
                         results.append((chunk, similarity))
+                        logger.debug(
+                            f"Found result: {chunk.file_path} with similarity {similarity}"
+                        )
 
                 return results
 
@@ -771,7 +866,7 @@ class SemanticIndex:
         self, query_vector: np.ndarray, k: int
     ) -> List[Tuple[CodeChunk, float]]:
         """
-        Perform a manual search using L2 distance calculation.
+        Perform a manual search using cosine similarity.
         This is a fallback for environments where FAISS search has issues.
 
         Args:
@@ -789,13 +884,13 @@ class SemanticIndex:
                 return []
 
             # We'll use stored embeddings instead of trying to reconstruct from FAISS
-            all_distances = []
+            all_similarities = []
             all_ids = []
 
             # Extract query vector to 1D for easier calculations
             q_vec = query_vector.reshape(-1)
 
-            # For each chunk, calculate the L2 distance
+            # For each chunk, calculate the cosine similarity
             for id_val in chunk_ids:
                 entry = self.metadata.get(id_val)
 
@@ -804,39 +899,46 @@ class SemanticIndex:
                     and hasattr(entry, "embedding")
                     and entry.embedding is not None
                 ):
-                    # Calculate L2 distance using stored embedding
+                    # Calculate cosine similarity using stored embedding
                     vector = entry.embedding
-                    dist = np.sum((vector - q_vec) ** 2)
-
-                    all_distances.append(dist)
+                    # Normalize the vector
+                    vector = vector / np.linalg.norm(vector)
+                    # Calculate cosine similarity
+                    similarity = np.dot(vector, q_vec)
+                    all_similarities.append(similarity)
                     all_ids.append(id_val)
                 else:
                     pass
 
-            if not all_distances:
+            if not all_similarities:
                 return []
 
             # Convert to numpy arrays
-            distances_np = np.array(all_distances)
+            similarities_np = np.array(all_similarities)
             ids_np = np.array(all_ids)
 
-            # Get the k smallest distances
-            if len(distances_np) <= k:
-                top_indices = np.argsort(distances_np)
+            # Get the k highest similarities
+            if len(similarities_np) <= k:
+                top_indices = np.argsort(similarities_np)[
+                    ::-1
+                ]  # Reverse for descending order
             else:
-                top_indices = np.argsort(distances_np)[:k]
+                top_indices = np.argsort(similarities_np)[::-1][
+                    :k
+                ]  # Reverse for descending order
 
             # Prepare results
             results = []
             for idx in top_indices:
                 chunk_id = ids_np[idx]
-                distance = distances_np[idx]
+                similarity = similarities_np[idx]
 
                 entry = self.metadata.get(int(chunk_id))
                 if entry and hasattr(entry, "chunk"):
-                    # Convert distance to similarity score (higher is better)
-                    similarity = 1.0 / (1.0 + float(distance))
-                    results.append((entry.chunk, similarity))
+                    results.append((entry.chunk, float(similarity)))
+                    logger.debug(
+                        f"Found result: {entry.chunk.file_path} with similarity {similarity}"
+                    )
 
             return results
 

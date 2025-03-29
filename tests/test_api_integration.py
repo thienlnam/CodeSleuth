@@ -14,6 +14,16 @@ from codesleuth.config import ParserConfig
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Check MLX availability
+try:
+    import mlx
+
+    MLX_AVAILABLE = True
+    logger.info("MLX is available")
+except ImportError:
+    MLX_AVAILABLE = False
+    logger.info("MLX is not available, will use PyTorch")
+
 
 class TestCodeSleuthIntegration(unittest.TestCase):
     """Integration tests for CodeSleuth with a sample repository."""
@@ -41,13 +51,18 @@ class TestCodeSleuthIntegration(unittest.TestCase):
                 respect_gitignore=True,
             )
 
+            # Use BGE-M3 if MLX is available, otherwise fall back to CodeBERT
+            model_name = (
+                EmbeddingModel.BGE_M3 if MLX_AVAILABLE else EmbeddingModel.CODEBERT
+            )
+
             # Configure semantic search
             index_config = IndexConfig(
-                model_name=EmbeddingModel.BGE_M3,
+                model_name=model_name,
                 index_path=str(cls.index_path),
                 batch_size=8,
                 use_gpu=False,
-                use_mlx=False,
+                use_mlx=MLX_AVAILABLE,  # Only use MLX if available
                 hnsw_m=16,
                 hnsw_ef_construction=200,
                 hnsw_ef_search=50,

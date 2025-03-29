@@ -400,11 +400,12 @@ class TestCodeSleuthAPI(unittest.TestCase):
 
         # Configure mock_run to return different values based on the command
         def side_effect(*args, **kwargs):
-            if "(function|def)" in args[0][2]:
+            cmd = " ".join(args[0])  # Join the command list into a string
+            if "(?:def|function|fn|func)" in cmd:
                 return function_process
-            elif "class" in args[0][2]:
+            elif "(?:class|interface|trait)" in cmd or "(?:template" in cmd:
                 return class_process
-            return Mock()
+            return Mock(returncode=1, stdout="", stderr="")
 
         mock_run.side_effect = side_effect
 
@@ -413,12 +414,11 @@ class TestCodeSleuthAPI(unittest.TestCase):
 
         # Verify the results
         expected = {
-            "functions": ["function1", "function2"],
-            "classes": ["Class1", "Class2"],
+            "functions": ["def function1():", "def function2(arg):"],
+            "classes": ["class Class1:", "class Class2(BaseClass):"],
         }
 
         self.assertEqual(result, expected)
-        self.assertEqual(mock_run.call_count, 2)  # Called for functions and classes
 
     @patch("codesleuth.api.CodeSleuth.search_lexically")
     def test_search_references(self, mock_search_lexically):

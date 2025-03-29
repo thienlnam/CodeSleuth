@@ -155,7 +155,12 @@ def test_language_detection(config):
     assert parser.get_language_for_file("example.cpp") == "cpp"
     assert parser.get_language_for_file("example.go") == "go"
     assert parser.get_language_for_file("example.rs") == "rust"
-    assert parser.get_language_for_file("example.txt") is None  # Unsupported file type
+    assert (
+        parser.get_language_for_file("example.txt") == "text"
+    )  # Text files are now supported
+    assert (
+        parser.get_language_for_file("example.unknown") is None
+    )  # Unsupported file type
 
 
 @pytest.mark.parametrize(

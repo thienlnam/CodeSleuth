@@ -156,6 +156,7 @@ class CodeParser:
             List of code chunks
         """
         str_path = str(file_path)
+        logger.debug(f"Parsing file: {str_path}")
 
         # Get the language from the file extension
         language = self.get_language_for_file(str_path)
@@ -180,6 +181,8 @@ class CodeParser:
                 logger.warning(f"Unknown language for file: {str_path}")
                 return []
 
+        logger.debug(f"Detected language: {language}")
+
         parser = self.tree_sitter_manager.get_parser(language)
         if parser is None:
             logger.warning(
@@ -192,6 +195,7 @@ class CodeParser:
             with open(str_path, "r", encoding="utf-8") as f:
                 code = f.read()
                 line_count = code.count("\n") + 1
+                logger.debug(f"File contains {line_count} lines")
 
             # For text files, always use line-based chunking
             if language == "text":
@@ -207,6 +211,7 @@ class CodeParser:
                     str_path, language, code, line_count
                 )
                 if chunks:
+                    logger.debug(f"Found {len(chunks)} chunks using Tree-sitter")
                     return chunks
 
             # If function parsing fails or is not supported, fall back to line-based chunking
@@ -231,12 +236,15 @@ class CodeParser:
         Returns:
             List of CodeChunk objects
         """
+        logger.debug(f"Parsing {file_path} with Tree-sitter")
         tree = self.tree_sitter_manager.parse_code(code, language)
         if tree is None:
+            logger.warning(f"Failed to parse {file_path} with Tree-sitter")
             return []
 
         chunks = []
         root_node = tree.root_node
+        logger.debug(f"Tree root node type: {root_node.type}")
 
         # Define query patterns for different languages to find function-like nodes
         query_patterns = {
@@ -245,7 +253,22 @@ class CodeParser:
                   name: (identifier) @function_name) @function
                   
                 (class_definition
-                  name: (identifier) @class_name) @class
+                  name: (identifier) @class_name
+                  body: (block
+                    (function_definition
+                      name: (identifier) @method_name) @method)) @class
+                  
+                (class_definition
+                  name: (identifier) @class_name
+                  body: (block
+                    (function_definition
+                      name: (identifier) @method_name
+                      body: (block
+                        (expression_statement
+                          (call
+                            function: (attribute
+                              object: (identifier) @self
+                              attribute: (identifier) @method_call)))))) @class_method
             """,
             "javascript": """
                 (function_declaration
@@ -293,6 +316,7 @@ class CodeParser:
                     query_patterns[language],
                 )
                 captures = query.captures(root_node)
+                logger.debug(f"Found {len(captures)} captures in {file_path}")
 
                 # Group captures by their node to find function/method definitions
                 nodes_with_names = {}
@@ -332,6 +356,10 @@ class CodeParser:
                             f"Error processing query capture: {e} - Capture: {capture}"
                         )
                         continue
+
+                logger.debug(
+                    f"Found {len(nodes_with_names)} unique nodes in {file_path}"
+                )
 
                 # Create chunks for each function/method
                 for node_data in nodes_with_names.values():
@@ -376,6 +404,9 @@ class CodeParser:
                                 language=language,
                             )
                         )
+                        logger.debug(
+                            f"Created chunk for {name} ({node_type}) at lines {start_line}-{end_line}"
+                        )
 
                 return chunks
 
@@ -408,6 +439,14 @@ class CodeParser:
             patterns = [
                 (r"def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", "function"),
                 (r"class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(\(|\:)", "class"),
+                (
+                    r"\s+def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*->",
+                    "method",
+                ),  # Class methods with return type
+                (
+                    r"\s+def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*:",
+                    "method",
+                ),  # Class methods without return type
             ]
 
             for pattern, symbol_type in patterns:
@@ -439,6 +478,9 @@ class CodeParser:
                             symbol_name=symbol_name,
                             language=language,
                         )
+                    )
+                    logger.debug(
+                        f"Created chunk for {symbol_name} ({symbol_type}) at lines {start_line}-{end_line}"
                     )
 
         elif language in ["javascript", "typescript"]:

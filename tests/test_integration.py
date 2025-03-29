@@ -20,6 +20,16 @@ print(f"Python version: {sys.version}")
 print(f"CUDA available: {torch.cuda.is_available()}")
 print(f"Device count: {torch.cuda.device_count() if torch.cuda.is_available() else 0}")
 
+# Check MLX availability
+try:
+    import mlx
+
+    MLX_AVAILABLE = True
+    print("MLX is available")
+except ImportError:
+    MLX_AVAILABLE = False
+    print("MLX is not available, will use PyTorch")
+
 # Try loading a model directly to see if that's where the segfault happens
 try:
     print("Loading tokenizer...")
@@ -77,12 +87,15 @@ class IntegrationTest(unittest.TestCase):
             respect_gitignore=True,
         )
 
+        # Use BGE-M3 if MLX is available, otherwise fall back to CodeBERT
+        model_name = EmbeddingModel.BGE_M3 if MLX_AVAILABLE else EmbeddingModel.CODEBERT
+
         index_config = IndexConfig(
-            model_name=EmbeddingModel.BGE_M3,
+            model_name=model_name,
             index_path=self.index_path,
             batch_size=8,
             use_gpu=False,
-            use_mlx=True,
+            use_mlx=MLX_AVAILABLE,  # Only use MLX if available
             hnsw_m=16,
             hnsw_ef_construction=200,
             hnsw_ef_search=50,

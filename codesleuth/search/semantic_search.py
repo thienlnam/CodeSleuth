@@ -56,12 +56,25 @@ class SemanticSearch:
             )
             return []
 
-        # Get search results from the index
-        results = self.semantic_index.search(query, top_k=top_k)
+        # Normalize query to focus on code-related terms
+        normalized_query = query.lower().strip()
+        if not normalized_query.endswith("."):
+            normalized_query += "."
 
-        # Format results for consumption by LLMs or other clients
+        # Add code-specific context if not present
+        if "code" not in normalized_query and "function" not in normalized_query:
+            normalized_query = f"Find code for {normalized_query}"
+
+        # Get search results from the index with increased top_k to account for filtering
+        results = self.semantic_index.search(normalized_query, top_k=top_k * 2)
+
+        # Format and filter results
         formatted_results = []
         for chunk, similarity in results:
+            # Skip results with very low similarity
+            if similarity < 0.5:  # Adjust threshold as needed
+                continue
+
             formatted_results.append(
                 {
                     "file_path": chunk.file_path,
@@ -73,6 +86,10 @@ class SemanticSearch:
                     "source": "semantic",
                 }
             )
+
+            # Break if we have enough high-quality results
+            if len(formatted_results) >= top_k:
+                break
 
         logger.debug(f"Found {len(formatted_results)} semantic results")
         return formatted_results
