@@ -46,10 +46,20 @@ jobs:
 
             - name: Install dependencies
               if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-              run: poetry install --no-interaction --no-root
+              run: |
+                  if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.architecture }}" = "arm64" ]; then
+                    poetry install --no-interaction --no-root
+                  else
+                    poetry install --no-interaction --no-root --without mlx
+                  fi
 
             - name: Install project
-              run: poetry install --no-interaction
+              run: |
+                  if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.architecture }}" = "arm64" ]; then
+                    poetry install --no-interaction
+                  else
+                    poetry install --no-interaction --without mlx
+                  fi
 
             - name: Run tests
               run: |
