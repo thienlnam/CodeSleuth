@@ -16,7 +16,7 @@ files = [
 name = "awkward"
 version = "2.8.1"
 description = "Manipulate JSON-like data with NumPy-like idioms."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
@@ -36,7 +36,7 @@ typing-extensions = {version = ">=4.1.0", markers = "python_version < \"3.11\""}
 name = "awkward-cpp"
 version = "45"
 description = "CPU kernels and compiled extensions for Awkward Array"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
@@ -538,7 +538,7 @@ all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2
 name = "importlib-metadata"
 version = "8.6.1"
 description = "Read metadata from Python packages"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 markers = "python_version < \"3.12\""
@@ -699,7 +699,7 @@ files = [
 name = "mlx"
 version = "0.24.1"
 description = "A framework for machine learning on Apple silicon."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
@@ -722,7 +722,7 @@ dev = ["nanobind (==2.4.0)", "numpy", "pre-commit", "setuptools (>=42)", "torch"
 name = "mlx-embedding-models"
 version = "0.0.11"
 description = "Python utility for text embeddings in MLX."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
@@ -1565,7 +1565,7 @@ torch = ["safetensors[numpy]", "torch (>=1.10)"]
 name = "scipy"
 version = "1.15.2"
 description = "Fundamental algorithms for scientific computing in Python"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
@@ -2105,7 +2105,7 @@ dev = ["black (>=19.3b0) ; python_version >= \"3.6\"", "pytest (>=4.6.2)"]
 name = "zipp"
 version = "3.21.0"
 description = "Backport of pathlib-compatible object wrapper for zip files"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 markers = "python_version < \"3.12\""
@@ -2125,4 +2125,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "24d4a11860cf1459f1d2053518c26908a2efb3cf921d9cc80ad3e364e621ae6a"
+content-hash = "ed8c527abf5f5ec48c62a0f779ea9fa93782bb62d5735e0bbf17389e97e48078"

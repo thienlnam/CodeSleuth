@@ -39,9 +39,9 @@ jobs:
             - name: Install dependencies
               run: |
                   if [ "${{ matrix.os }}" = "macos-latest" ] && [ "${{ matrix.architecture }}" = "arm64" ]; then
-                    poetry install --no-interaction --no-root
+                    poetry install --no-interaction
                   else
-                    poetry install --no-interaction --no-root --without mlx
+                    poetry install --without arm
                   fi
 
             - name: Run tests

@@ -43,7 +43,7 @@ jobs:
 
             - name: Install dependencies
               run: |
-                  poetry install
+                  poetry install --without arm
 
             - name: Build package
               run: poetry build
