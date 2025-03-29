@@ -31,8 +31,8 @@ class ModelInfo:
 
     name: str
     huggingface_name: str
-    mlx_name: Optional[str] = None  # None means not supported on MLX
     embedding_dim: int
+    mlx_name: Optional[str] = None  # None means not supported on MLX
     max_length: int = 512
 
 
@@ -82,13 +82,17 @@ class IndexEntry:
 class CodeEmbedder:
     """Code embedding model."""
 
-    def __init__(self, model_name: EmbeddingModel, use_gpu: bool = False):
+    def __init__(
+        self, model_name: EmbeddingModel, use_gpu: bool = False, use_mlx: bool = True
+    ):
         """
         Initialize the code embedder.
 
         Args:
             model_name: Name of the model to use
             use_gpu: Whether to use GPU for embedding computation
+            use_mlx: Whether to use MLX for embedding computation on Apple Silicon
+                    If True, will automatically detect and use MLX on Apple Silicon if available
 
         Raises:
             ValueError: If the model is not supported or not available on the current platform
@@ -99,37 +103,35 @@ class CodeEmbedder:
             )
 
         self.model_info = MODEL_REGISTRY[model_name]
+        self.use_mlx = False  # Default to not using MLX
 
-        # Check platform and model support
+        # Check if we should use MLX
         is_apple_silicon = platform.processor() == "arm"
-        if is_apple_silicon and MLX_AVAILABLE:
-            if self.model_info.mlx_name is None:
-                raise ValueError(
-                    f"Model {model_name} is not supported on Apple Silicon with MLX. "
-                    "Please use a different model or run without MLX support."
-                )
-            logger.info(f"Using MLX model: {self.model_info.mlx_name}")
-            self.use_mlx = True
-            self.device = None  # MLX handles device management
-            self.model = MLXEmbeddingModel.from_registry(self.model_info.mlx_name)
-            self.tokenizer = None  # MLX handles tokenization
-        else:
-            self.use_mlx = False
-            self.device = torch.device(
-                "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
-            )
-            logger.info(
-                f"Using HuggingFace model: {self.model_info.huggingface_name} on {self.device}"
-            )
+        if is_apple_silicon and MLX_AVAILABLE and use_mlx and not use_gpu:
+            if self.model_info.mlx_name is not None:
+                logger.info(f"Using MLX model: {self.model_info.mlx_name}")
+                self.use_mlx = True
+                self.device = None  # MLX handles device management
+                self.model = MLXEmbeddingModel.from_registry(self.model_info.mlx_name)
+                self.tokenizer = None  # MLX handles tokenization
+                return
+            else:
+                logger.info("MLX not available for this model, falling back to PyTorch")
 
-            # Load the model and tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_info.huggingface_name
-            )
-            self.model = AutoModel.from_pretrained(self.model_info.huggingface_name).to(
-                self.device
-            )
-            self.model.eval()
+        # If we're not using MLX, use PyTorch
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() and use_gpu else "cpu"
+        )
+        logger.info(
+            f"Using HuggingFace model: {self.model_info.huggingface_name} on {self.device}"
+        )
+
+        # Load the model and tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_info.huggingface_name)
+        self.model = AutoModel.from_pretrained(self.model_info.huggingface_name).to(
+            self.device
+        )
+        self.model.eval()
 
     def embed(self, code: str) -> np.ndarray:
         """
@@ -228,7 +230,8 @@ class SemanticIndex:
         try:
             self.embedder = CodeEmbedder(
                 model_name=config.model_name,
-                use_gpu=False,  # Always use CPU for indexing
+                use_gpu=config.use_gpu,  # Pass use_gpu from config
+                use_mlx=config.use_mlx,  # Pass use_mlx from config
             )
         except Exception as e:
             logger.error(f"Failed to initialize embedding model: {e}")
@@ -534,8 +537,8 @@ class SemanticIndex:
 
         # Find chunks to remove
         to_remove = []
-        for id, chunk in self.metadata.items():
-            if chunk.file_path == str_path:
+        for id, entry in self.metadata.items():
+            if entry.chunk.file_path == str_path:
                 to_remove.append(id)
 
         if not to_remove:
@@ -591,11 +594,11 @@ class SemanticIndex:
 
         # Get all existing IDs and their corresponding chunks
         all_ids = list(self.metadata.keys())
-        all_chunks = [self.metadata[id] for id in all_ids]
+        all_entries = [self.metadata[id] for id in all_ids]
 
         # Re-embed all chunks
-        logger.info(f"Re-embedding {len(all_chunks)} chunks for index rebuild")
-        codes = [chunk.code for chunk in all_chunks]
+        logger.info(f"Re-embedding {len(all_entries)} chunks for index rebuild")
+        codes = [entry.chunk.code for entry in all_entries]
         embeddings = self.embedder.embed_batch(codes, batch_size=self.config.batch_size)
 
         # Create new index of the same type as the current one
@@ -628,12 +631,7 @@ class SemanticIndex:
         # Count existing chunks for this file
         existing_chunk_count = 0
         for id, entry in self.metadata.items():
-            if isinstance(entry, IndexEntry):
-                chunk = entry.chunk
-            else:
-                chunk = entry
-
-            if chunk.file_path == str_path:
+            if entry.chunk.file_path == str_path:
                 existing_chunk_count += 1
 
         logger.info(f"Found {existing_chunk_count} existing chunks for file {str_path}")
@@ -644,12 +642,7 @@ class SemanticIndex:
         # Verify chunks were removed
         remaining_count = 0
         for id, entry in self.metadata.items():
-            if isinstance(entry, IndexEntry):
-                chunk = entry.chunk
-            else:
-                chunk = entry
-
-            if chunk.file_path == str_path:
+            if entry.chunk.file_path == str_path:
                 remaining_count += 1
 
         logger.info(
@@ -662,12 +655,7 @@ class SemanticIndex:
         # Verify new chunks were added
         final_count = 0
         for id, entry in self.metadata.items():
-            if isinstance(entry, IndexEntry):
-                chunk = entry.chunk
-            else:
-                chunk = entry
-
-            if chunk.file_path == str_path:
+            if entry.chunk.file_path == str_path:
                 final_count += 1
 
         logger.info(f"After update: {final_count} chunks for file {str_path}")

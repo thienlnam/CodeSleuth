@@ -87,6 +87,12 @@ class IndexConfig(BaseModel):
         default=False,
         description="Whether to use GPU for embedding computation",
     )
+    use_mlx: bool = Field(
+        default=True,
+        description="Whether to use MLX for embedding computation on Apple Silicon. "
+        "If True, will automatically detect and use MLX when available on Apple Silicon. "
+        "Set to False to force PyTorch even on Apple Silicon.",
+    )
     # HNSW index configuration
     hnsw_m: int = Field(
         default=16,
