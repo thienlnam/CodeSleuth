@@ -27,7 +27,7 @@ CodeSleuth addresses these gaps by offering:
     -   **Semantic Search:** Find code based on natural language descriptions or conceptual similarity.
     -   **Context-Aware Results:** Retrieves meaningful code chunks (often function/class level) ideal for LLM context.
 -   **⚡ High Performance**:
-    -   **MLX Acceleration:** Native embedding calculation support for Apple Silicon (M1/M2/M3) via `mlx-embedding-models`.
+    -   **MLX Acceleration:** Native embedding calculation support for Apple Silicon (M1/M2/M3) via `mlx-embedding-models`. Requires installing optional dependencies (`pip install codesleuth[arm]`).
     -   **Efficient Indexing:** Uses optimized FAISS vector indexes (`HNSW` or `FlatL2`) for fast lookups.
     -   **Fast Code Parsing:** Leverages Tree-sitter for quick and accurate code analysis.
     -   **Optimized for Large Codebases:** Efficient chunking, batch processing, and performant search algorithms.
@@ -40,8 +40,16 @@ CodeSleuth addresses these gaps by offering:
 ## Installation
 
 ```bash
+# Standard installation
 pip install codesleuth
-# Ensure ripgrep is installed (e.g., brew install ripgrep, apt install ripgrep)
+
+# To enable MLX acceleration on Apple Silicon (ARM), install optional dependencies:
+pip install codesleuth[arm]
+# Or using Poetry:
+# poetry install --with arm
+
+# Ensure ripgrep is installed for Lexical Search
+# (e.g., brew install ripgrep, apt install ripgrep)
 # sudo apt-get install ripgrep # Ubuntu Example
 # brew install ripgrep # MacOS Example
 ```
