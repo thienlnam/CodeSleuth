@@ -1,6 +1,6 @@
 [project]
 name = "codesleuth"
-version = "0.1.0"
+version = "0.1.1"
 description = "CodeSleuth is a local-first code search and retrieval tool optimized for LLM integration"
 authors = [
     {name = "Jack Nam",email = "naminalstack+codesleuth@gmail.com"}
